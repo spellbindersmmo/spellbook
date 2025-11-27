@@ -2,5 +2,8 @@
 	"/": [],
 	"/login": [],
 	"/projects": [],
-	"/projects/new": []
+	"/projects/new": [],
+	"/projects/[id]": [
+		"src/routes/projects/[id]/+page.ts"
+	]
 }
