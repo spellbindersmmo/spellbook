@@ -1,18 +1,31 @@
 <script lang="ts">
-	import { createProject } from '$lib/supabase'
+	import { createProject, supabase } from '$lib/supabase'
 	import { goto } from '$app/navigation'
 	import { user } from '$lib/stores'
+	import { onMount } from 'svelte'
 
 	let name = ''
 	let description = ''
 	let imageUrl = ''
 	let loading = false
 	let error = ''
+	let debugInfo = ''
 
 	// Redirect if not logged in
 	$: if (!$user) {
 		goto('/login')
 	}
+
+	onMount(async () => {
+		// Debug: Check if user is properly authenticated
+		const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser()
+		if (currentUser) {
+			debugInfo = `User authenticated: ${currentUser.email} (ID: ${currentUser.id})`
+		} else {
+			debugInfo = 'User not authenticated'
+			console.error('Auth error:', userError)
+		}
+	})
 
 	async function handleSubmit() {
 		if (!name.trim()) {
@@ -26,13 +39,14 @@
 		try {
 			const project = await createProject({
 				name: name.trim(),
-				description: description.trim() || null,
-				image_url: imageUrl.trim() || null
+				description: description.trim() || undefined,
+				image_url: imageUrl.trim() || undefined
 			})
 
 			goto(`/projects/${project.id}`)
 		} catch (err) {
-			error = err.message
+			console.error('Full error:', err)
+			error = err.message || 'Failed to create project'
 		} finally {
 			loading = false
 		}
@@ -45,10 +59,17 @@
 
 <div style="max-width: 600px; margin: 2rem auto;">
 	<div style="margin-bottom: 2rem;">
-		<a href="/projects" style="color: #007acc; text-decoration: none;">← Back to Projects</a>
+		<a href="/" style="color: #007acc; text-decoration: none;">← Back to Home</a>
 	</div>
 
 	<h1>Create New Project</h1>
+
+	<!-- Debug info (remove this after testing) -->
+	{#if debugInfo}
+		<div style="background: #f0f8ff; padding: 0.5rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.875rem;">
+			Debug: {debugInfo}
+		</div>
+	{/if}
 
 	<form on:submit|preventDefault={handleSubmit} style="background: white; padding: 2rem; border: 1px solid #ddd; border-radius: 8px;">
 		<div style="margin-bottom: 1.5rem;">
@@ -111,7 +132,7 @@
 			</button>
 			
 			<a 
-				href="/projects"
+				href="/"
 				style="flex: 1; padding: 0.75rem; background: #f5f5f5; color: #333; border: 1px solid #ccc; border-radius: 4px; text-decoration: none; text-align: center;"
 			>
 				Cancel
