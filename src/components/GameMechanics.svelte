@@ -1,1064 +1,1582 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte'
-	import * as d3 from 'd3'
-	import type { Project } from '../types'
+  import { SvelteFlow, Controls, Background, MiniMap, Panel } from '@xyflow/svelte';
+  import '@xyflow/svelte/dist/style.css';
+  import type { Project } from '../types';
+  import ProcessNode from './nodes/ProcessNode.svelte';
+  import StartNode from './nodes/StartNode.svelte';
+  import EndNode from './nodes/EndNode.svelte';
+  import DecisionNode from './nodes/DecisionNode.svelte';
+  import CommentNode from './nodes/CommentNode.svelte';
+  import LoopNode from './nodes/LoopNode.svelte';
+  import { supabase } from '$lib/supabase';
 
-	export let project: Project
+  interface Props {
+    project: Project;
+  }
 
-	interface MechanicNode {
-		id: string
-		name: string
-		description: string
-		category: string
-		mechanicType: 'core' | 'rule' | 'component' | 'action' | 'condition' | 'resource'
-		details: {
-			trigger?: string
-			effect?: string
-			cost?: string
-			requirements?: string
-			examples?: string
-		}
-		x: number
-		y: number
-		color?: string
-	}
+  let { project }: Props = $props();
 
-	interface MechanicLink {
-		id: string
-		source: string
-		target: string
-		relationship: string
-		description?: string
-	}
+  const nodeTypes = {
+    process: ProcessNode,
+    start: StartNode,
+    end: EndNode,
+    decision: DecisionNode,
+    comment: CommentNode,
+    loop: LoopNode
+  };
 
-	let svgElement: SVGElement
-	let showModal = false
-	let showConnectionModal = false
-	let editingNode: MechanicNode | null = null
-	let isNewNode = false
-	let selectedNodes: string[] = []
-    // Connection manager modal state
-    let showConnectionManager = false
-    let showConfirmModal = false
-    let confirmMessage = ''
-    let confirmAction = null
+  const defaultEdgeOptions = {
+    type: 'smoothstep',
+    animated: false
+  };
 
-	// Node categories and types
-	const nodeCategories = [
-		'Core Mechanics',
-		'Game Components', 
-		'Player Actions',
-		'Rules & Conditions',
-		'Resources',
-		'Victory Conditions',
-		'Setup & Flow'
-	]
+  let nodes = $state.raw([
+    {
+      id: '1',
+      type: 'start',
+      data: { label: 'Start Turn' },
+      position: { x: 250, y: 50 }
+    },
+    {
+      id: '2',
+      type: 'end',
+      data: { label: 'End Turn' },
+      position: { x: 250, y: 200 }
+    }
+  ]);
 
-	const nodeTypes = [
-		{ value: 'core', label: 'Core Mechanic', color: '#1976d2' },
-		{ value: 'component', label: 'Game Component', color: '#4caf50' },
-		{ value: 'action', label: 'Player Action', color: '#ff9800' },
-		{ value: 'rule', label: 'Rule/Condition', color: '#9c27b0' },
-		{ value: 'resource', label: 'Resource/Currency', color: '#f44336' },
-		{ value: 'condition', label: 'Win/Lose Condition', color: '#607d8b' }
-	]
+  let edges = $state.raw([
+    { 
+      id: 'e1-2', 
+      source: '1', 
+      target: '2', 
+      type: 'smoothstep', 
+      label: '', 
+      baseLabel: '', 
+      selected: false, 
+      resources: [] 
+    }
+  ]);
 
-	const relationshipTypes = [
-		'requires',
-		'triggers',
-		'modifies',
-		'consumes',
-		'produces',
-		'prevents',
-		'enables',
-		'depends on',
-		'part of'
-	]
+  let nodeIdCounter = 3;
+  let selectedEdgeId = $state<string | null>(null);
+  let edgeLabelInput = $state('');
+  let showEdgeEditor = $state(false);
+  let edgeType = $state<'smoothstep' | 'straight' | 'step' | 'bezier'>('smoothstep');
+  
+  // Save/Load state
+  let currentFlowId = $state<string | null>(null);
+  let flowName = $state('Untitled Flow');
+  let flowDescription = $state('');
+  let isSaving = $state(false);
+  let saveMessage = $state('');
+  let showSaveDialog = $state(false);
+  let savedFlows = $state<any[]>([]);
+  let showLoadDialog = $state(false);
+  let autoSaveEnabled = $state(true);
+  let lastSavedAt = $state<Date | null>(null);
+  let autoSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+  
+  // Resource flow editor
+  let edgeResources = $state<Array<{icon: string, value: string, color: string}>>([]);
+  let newResourceIcon = $state('');
+  let newResourceValue = $state('');
+  let newResourceColor = $state('#D4A574');
 
-	// Initial example for card game
-	let nodes: MechanicNode[] = [
-		{
-			id: 'deck',
-			name: 'Deck',
-			description: 'Collection of cards each player uses',
-			category: 'Game Components',
-			mechanicType: 'component',
-			details: {
-				examples: 'Standard 52-card deck, custom game cards, etc.'
-			},
-			x: 200,
-			y: 300,
-			color: '#4caf50'
-		},
-		{
-			id: 'hand',
-			name: 'Hand',
-			description: 'Cards currently held by player',
-			category: 'Game Components',
-			mechanicType: 'component',
-			details: {
-				requirements: 'Must have deck to draw from',
-				examples: 'Hand limit of 7 cards, no hand limit, etc.'
-			},
-			x: 400,
-			y: 200,
-			color: '#4caf50'
-		},
-		{
-			id: 'draw',
-			name: 'Draw Card',
-			description: 'Take a card from deck to hand',
-			category: 'Player Actions',
-			mechanicType: 'action',
-			details: {
-				trigger: 'Start of turn, specific actions',
-				cost: 'May cost action points or be automatic',
-				requirements: 'Deck must have cards, hand not at limit'
-			},
-			x: 300,
-			y: 100,
-			color: '#ff9800'
-		}
-	]
+  const resourcePresets = [
+    { icon: '💰', label: 'Gold', color: '#D4A574' },
+    { icon: '❤️', label: 'Health', color: '#E08B68' },
+    { icon: '🎴', label: 'Cards', color: '#9FB396' },
+    { icon: '⚡', label: 'Energy', color: '#8A9B7A' },
+    { icon: '🛡️', label: 'Armor', color: '#7D7669' },
+    { icon: '⚔️', label: 'Attack', color: '#E08B68' },
+    { icon: '🔮', label: 'Mana', color: '#7A8C6F' },
+    { icon: '⭐', label: 'Points', color: '#D4A574' },
+    { icon: '🎯', label: 'Actions', color: '#9FB396' },
+    { icon: '💎', label: 'Gems', color: '#8A9B7A' }
+  ];
 
-	let links: MechanicLink[] = [
-		{
-			id: 'deck-to-hand',
-			source: 'deck',
-			target: 'hand',
-			relationship: 'produces',
-			description: 'Cards move from deck to hand when drawn'
-		},
-		{
-			id: 'draw-requires-deck',
-			source: 'draw',
-			target: 'deck',
-			relationship: 'requires',
-			description: 'Drawing requires a deck with cards'
-		}
-	]
+  const nodeTemplates = [
+    { type: 'start', label: 'Start', icon: '▶️', description: 'Begin a process' },
+    { type: 'process', label: 'Process', icon: '⚙️', description: 'A step in the flow' },
+    { type: 'decision', label: 'Decision', icon: '❓', description: 'Conditional branching' },
+    { type: 'loop', label: 'Loop', icon: '🔄', description: 'Repeat actions' },
+    { type: 'end', label: 'End', icon: '🏁', description: 'End a process' },
+    { type: 'comment', label: 'Comment', icon: '📝', description: 'Design notes & comments' }
+  ];
 
-	// Modal form data
-	let nodeName = ''
-	let nodeDescription = ''
-	let nodeCategory = 'Core Mechanics'
-	let nodeMechanicType: 'core' | 'rule' | 'component' | 'action' | 'condition' | 'resource' = 'core'
-	let nodeTrigger = ''
-	let nodeEffect = ''
-	let nodeCost = ''
-	let nodeRequirements = ''
-	let nodeExamples = ''
+  const edgeTypes = [
+    { value: 'smoothstep', label: 'Smooth Step', icon: '〰️' },
+    { value: 'straight', label: 'Straight', icon: '━' },
+    { value: 'step', label: 'Step', icon: '⊏⊐' },
+    { value: 'bezier', label: 'Bezier', icon: '⌇' }
+  ];
 
-	// Connection modal data
-	let connectionSource = ''
-	let connectionTarget = ''
-	let connectionRelationship = 'requires'
-	let connectionDescription = ''
+  let draggedType = $state(null);
+  let previousEdgeCount = $state(edges.length);
 
-	let width = 900
-	let height = 700
+  // Load flows on mount
+  $effect(() => {
+    loadFlows();
+  });
 
-	// Drag state
-	let isDragging = false
-	let dragNodeId = ''
+  // Auto-save when nodes or edges change
+  $effect(() => {
+    // Track nodes and edges for changes
+    const _ = [nodes, edges];
+    
+    // Only autosave if we have a current flow and autosave is enabled
+    if (currentFlowId && autoSaveEnabled && !isSaving) {
+      scheduleAutoSave();
+    }
+  });
 
-	onMount(() => {
-		setupMindMap()
-	})
+  function scheduleAutoSave() {
+    // Clear existing timeout
+    if (autoSaveTimeout) {
+      clearTimeout(autoSaveTimeout);
+    }
 
-	function getNodeColor(mechanicType: string): string {
-		const typeInfo = nodeTypes.find(t => t.value === mechanicType)
-		return typeInfo?.color || '#666'
-	}
+    // Schedule autosave after 3 seconds of inactivity
+    autoSaveTimeout = setTimeout(() => {
+      autoSave();
+    }, 3000);
+  }
 
-	function setupMindMap() {
-		const svg = d3.select(svgElement)
-			.attr('width', width)
-			.attr('height', height)
+  async function autoSave() {
+    if (!currentFlowId || isSaving) return;
 
-		svg.selectAll('*').remove()
+    const flowData = {
+      nodes: nodes,
+      edges: edges
+    };
 
-		const g = svg.append('g')
-		const zoom = d3.zoom()
-			.scaleExtent([0.1, 3])
-			.on('zoom', (event) => {
-				g.attr('transform', event.transform)
-			})
+    try {
+      const { error } = await supabase
+        .from('game_flows')
+        .update(flowData)
+        .eq('id', currentFlowId);
 
-		svg.call(zoom)
+      if (!error) {
+        lastSavedAt = new Date();
+      }
+    } catch (error) {
+      console.error('Auto-save error:', error);
+    }
+  }
 
-		// Add arrow markers for directed relationships
-		svg.append('defs').selectAll('marker')
-			.data(['arrow'])
-			.enter().append('marker')
-			.attr('id', 'arrow')
-			.attr('viewBox', '0 -5 10 10')
-			.attr('refX', 15)
-			.attr('refY', 0)
-			.attr('markerWidth', 6)
-			.attr('markerHeight', 6)
-			.attr('orient', 'auto')
-			.append('path')
-			.attr('d', 'M0,-5L10,0L0,5')
-			.attr('fill', '#666')
+  async function loadFlows() {
+    const { data, error } = await supabase
+      .from('game_flows')
+      .select('*')
+      .eq('project_id', project.id)
+      .order('updated_at', { ascending: false });
 
-		updateVisualization(g)
+    if (error) {
+      console.error('Error loading flows:', error);
+    } else {
+      savedFlows = data || [];
+    }
+  }
 
-		// Add double-click to canvas for new nodes
-		svg.on('dblclick', (event) => {
-			const [x, y] = d3.pointer(event, g.node())
-			createNewNode(x, y)
-		})
-	}
+  async function saveFlow() {
+    if (!flowName.trim()) {
+      saveMessage = 'Please enter a flow name';
+      return;
+    }
 
-function updateVisualization(g) {
-	// Bind links data
-	const linkGroup = g.selectAll('.links')
-		.data([links])
+    isSaving = true;
+    saveMessage = '';
 
-	const linkGroupEnter = linkGroup.enter()
-		.append('g')
-		.attr('class', 'links')
+    const flowData = {
+      project_id: project.id,
+      name: flowName.trim(),
+      description: flowDescription.trim(),
+      nodes: nodes,
+      edges: edges
+    };
 
-	const linkGroupMerged = linkGroupEnter.merge(linkGroup)
+    try {
+      if (currentFlowId) {
+        // Update existing flow
+        const { error } = await supabase
+          .from('game_flows')
+          .update(flowData)
+          .eq('id', currentFlowId);
 
-	// Update links
-	const links_selection = linkGroupMerged.selectAll('.link')
-		.data(links, d => d.id)
+        if (error) throw error;
+        saveMessage = 'Flow updated successfully!';
+        lastSavedAt = new Date();
+      } else {
+        // Create new flow
+        const { data, error } = await supabase
+          .from('game_flows')
+          .insert([flowData])
+          .select()
+          .single();
 
-	const linksEnter = links_selection.enter()
-		.append('g')
-		.attr('class', 'link')
+        if (error) throw error;
+        currentFlowId = data.id;
+        saveMessage = 'Flow saved successfully!';
+        lastSavedAt = new Date();
+      }
 
-	// Add line for each link
-	linksEnter.append('line')
-		.attr('stroke', '#666')
-		.attr('stroke-opacity', 0.8)
-		.attr('stroke-width', 2)
-		.attr('marker-end', 'url(#arrow)')
+      await loadFlows();
+      
+      setTimeout(() => {
+        saveMessage = '';
+        showSaveDialog = false;
+      }, 2000);
+    } catch (error) {
+      console.error('Error saving flow:', error);
+      saveMessage = 'Error saving flow. Please try again.';
+    } finally {
+      isSaving = false;
+    }
+  }
 
-	// Add text for each link
-	linksEnter.append('text')
-		.attr('dy', -5)
-		.attr('text-anchor', 'middle')
-		.attr('font-size', '10px')
-		.attr('fill', '#666')
+  async function loadFlowById(flowId: string) {
+    const { data, error } = await supabase
+      .from('game_flows')
+      .select('*')
+      .eq('id', flowId)
+      .single();
 
-	// Update all links (enter + existing)
-	const linksMerged = linksEnter.merge(links_selection)
+    if (error) {
+      console.error('Error loading flow:', error);
+      return;
+    }
 
-	linksMerged.select('line')
-		.attr('x1', d => getNodeById(d.source).x)
-		.attr('y1', d => getNodeById(d.source).y)
-		.attr('x2', d => getNodeById(d.target).x)
-		.attr('y2', d => getNodeById(d.target).y)
-		.style('cursor', 'pointer') // Add cursor pointer
+    if (data) {
+      currentFlowId = data.id;
+      flowName = data.name;
+      flowDescription = data.description || '';
+      nodes = data.nodes;
+      edges = data.edges;
+      lastSavedAt = new Date(data.updated_at);
+      
+      // Update nodeIdCounter to prevent ID conflicts
+      const maxNodeId = Math.max(...nodes.map((n: any) => {
+        const match = n.id.match(/\d+/);
+        return match ? parseInt(match[0]) : 0;
+      }));
+      nodeIdCounter = maxNodeId + 1;
+      
+      showLoadDialog = false;
+    }
+  }
 
-	linksMerged.select('text')
-		.attr('x', d => (getNodeById(d.source).x + getNodeById(d.target).x) / 2)
-		.attr('y', d => (getNodeById(d.source).y + getNodeById(d.target).y) / 2)
-		.text(d => d.relationship)
-		.style('cursor', 'pointer') // Add cursor pointer
+  async function deleteFlow(flowId: string) {
+    if (!confirm('Are you sure you want to delete this flow?')) return;
 
-	// Add click handlers to delete connections
-    linksMerged
-        .on('contextmenu', (event, d) => {
-            event.preventDefault()
-            showDeleteConnectionConfirm(d)
-        })
-        .on('click', (event, d) => {
-            event.stopPropagation()
-            showDeleteConnectionConfirm(d)
-        })
+    const { error } = await supabase
+      .from('game_flows')
+      .delete()
+      .eq('id', flowId);
 
-	// Remove old links
-	links_selection.exit().remove()
+    if (error) {
+      console.error('Error deleting flow:', error);
+    } else {
+      await loadFlows();
+      if (currentFlowId === flowId) {
+        newFlow();
+      }
+    }
+  }
 
-	// Bind nodes data
-	const nodeGroup = g.selectAll('.nodes')
-		.data([nodes])
+  function newFlow() {
+    currentFlowId = null;
+    flowName = 'Untitled Flow';
+    flowDescription = '';
+    lastSavedAt = null;
+    nodes = [
+      {
+        id: '1',
+        type: 'start',
+        data: { label: 'Start Turn' },
+        position: { x: 250, y: 50 }
+      },
+      {
+        id: '2',
+        type: 'end',
+        data: { label: 'End Turn' },
+        position: { x: 250, y: 200 }
+      }
+    ];
+    edges = [
+      { 
+        id: 'e1-2', 
+        source: '1', 
+        target: '2', 
+        type: 'smoothstep', 
+        label: '', 
+        baseLabel: '', 
+        selected: false, 
+        resources: [] 
+      }
+    ];
+    nodeIdCounter = 3;
+  }
 
-	const nodeGroupEnter = nodeGroup.enter()
-		.append('g')
-		.attr('class', 'nodes')
+  // Generate edge label with resources
+  function generateEdgeLabel(baseLabel: string, resources: any[]) {
+    const parts = [];
+    
+    if (baseLabel) {
+      parts.push(baseLabel);
+    }
+    
+    if (resources && resources.length > 0) {
+      const resourceStr = resources
+        .map((r: any) => `${r.icon} ${r.value}`)
+        .join(' ');
+      parts.push(resourceStr);
+    }
+    
+    return parts.join(' | ');
+  }
 
-	const nodeGroupMerged = nodeGroupEnter.merge(nodeGroup)
+  // Auto-label edges from decision/loop nodes (only on new edges)
+  $effect(() => {
+    if (edges.length > previousEdgeCount) {
+      edges = edges.map(edge => {
+        if (!edge.baseLabel) {
+          const sourceNode = nodes.find(n => n.id === edge.source);
+          let baseLabel = '';
+          
+          if (sourceNode?.type === 'decision') {
+            if (edge.sourceHandle === 'yes') {
+              baseLabel = 'Yes';
+            } else if (edge.sourceHandle === 'no') {
+              baseLabel = 'No';
+            }
+          } else if (sourceNode?.type === 'loop') {
+            if (edge.sourceHandle === 'loop') {
+              baseLabel = 'Loop';
+            } else if (edge.sourceHandle === 'exit') {
+              baseLabel = 'Exit';
+            }
+          }
 
-	// Update nodes
-	const nodes_selection = nodeGroupMerged.selectAll('.node')
-		.data(nodes, d => d.id)
-
-	const nodesEnter = nodes_selection.enter()
-		.append('g')
-		.attr('class', 'node')
-
-	// Add rectangle for each node
-	nodesEnter.append('rect')
-		.attr('width', 140)
-		.attr('height', 80)
-		.attr('x', -70)
-		.attr('y', -40)
-		.attr('rx', 10)
-		.attr('stroke', '#333')
-		.attr('stroke-width', 2)
-		.style('cursor', 'move')
-
-	// Add title text
-	nodesEnter.append('text')
-		.attr('class', 'title')
-		.attr('dy', -10)
-		.attr('text-anchor', 'middle')
-		.attr('fill', 'white')
-		.attr('font-size', '12px')
-		.attr('font-weight', 'bold')
-		.style('pointer-events', 'none')
-
-	// Add type text
-	nodesEnter.append('text')
-		.attr('class', 'type')
-		.attr('dy', 10)
-		.attr('text-anchor', 'middle')
-		.attr('fill', 'rgba(255,255,255,0.8)')
-		.attr('font-size', '10px')
-		.style('pointer-events', 'none')
-
-	// Update all nodes (enter + existing)
-	const nodesMerged = nodesEnter.merge(nodes_selection)
-
-	nodesMerged
-		.attr('transform', d => `translate(${d.x}, ${d.y})`)
-
-	nodesMerged.select('rect')
-		.attr('fill', d => d.color || getNodeColor(d.mechanicType))
-		.attr('stroke-width', d => selectedNodes.includes(d.id) ? 4 : 2)
-
-	nodesMerged.select('.title')
-		.text(d => d.name.length > 18 ? d.name.substring(0, 15) + '...' : d.name)
-
-	nodesMerged.select('.type')
-		.text(d => nodeTypes.find(t => t.value === d.mechanicType)?.label || d.mechanicType)
-
-	// FIXED NODE EVENT HANDLERS - Proper mouse state management with right-click fix
-	let isMouseDown = false
-	let mouseStartPos = null
-	let dragStarted = false
-	let dragNode = null
-
-	nodesMerged
-		.on('mousedown', (event, d) => {
-			// Don't handle right-click here
-			if (event.button === 2) return
-			
-			event.preventDefault()
-			event.stopPropagation()
-			
-			isMouseDown = true
-			mouseStartPos = { x: event.clientX, y: event.clientY }
-			dragStarted = false
-			dragNode = d
-		})
-		.on('mouseup', (event, d) => {
-			// Don't handle right-click here
-			if (event.button === 2) return
-			
-			event.preventDefault()
-			event.stopPropagation()
-			
-			if (!isMouseDown) return
-			
-			// Reset all tracking variables
-			const wasClick = !dragStarted
-			isMouseDown = false
-			mouseStartPos = null
-			dragStarted = false
-			dragNode = null
-			
-			// Handle click if it wasn't a drag
-			if (wasClick) {
-				handleNodeClick(event, d)
-			}
-		})
-		.on('mouseleave', (event, d) => {
-			// Stop dragging if mouse leaves the node
-			isMouseDown = false
-			mouseStartPos = null
-			dragStarted = false
-			dragNode = null
-		})
-        .on('contextmenu', (event, d) => {
-            event.preventDefault()
-            event.stopPropagation()
-            
-            // Show confirmation modal for deleting nodes
-            showDeleteNodeConfirm(d)
-        })
-
-	// Add mousemove to the SVG itself, not individual nodes
-	const svg = d3.select(svgElement)
-	svg.on('mousemove', (event) => {
-		if (!isMouseDown || !mouseStartPos || !dragNode) return
-		
-		const currentPos = { x: event.clientX, y: event.clientY }
-		const deltaX = currentPos.x - mouseStartPos.x
-		const deltaY = currentPos.y - mouseStartPos.y
-		
-		// Start dragging if moved more than 5 pixels
-		if (!dragStarted && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
-			dragStarted = true
-		}
-		
-		if (dragStarted) {
-			// Get the transform of the parent group for proper coordinate conversion
-			const transform = d3.zoomTransform(g.node())
-			const svgRect = svgElement.getBoundingClientRect()
-			
-			// Convert screen coordinates to SVG coordinates
-			const svgX = (currentPos.x - svgRect.left - transform.x) / transform.k
-			const svgY = (currentPos.y - svgRect.top - transform.y) / transform.k
-			
-			// Update node position
-			dragNode.x = svgX
-			dragNode.y = svgY
-			
-			// Update visual immediately
-			const nodeSelection = g.selectAll('.node').filter(d => d.id === dragNode.id)
-			nodeSelection.attr('transform', `translate(${dragNode.x}, ${dragNode.y})`)
-			
-			// Update links
-			updateLinks(g)
-		}
-	})
-	
-	// Also handle mouseup on the SVG to catch releases outside of nodes
-	svg.on('mouseup', (event) => {
-		if (isMouseDown) {
-			isMouseDown = false
-			mouseStartPos = null
-			dragStarted = false
-			dragNode = null
-		}
-	})
-
-	// Remove old nodes
-	nodes_selection.exit().remove()
-}
-
-// Keep this helper function the same
-function handleNodeClick(event, d) {
-	console.log('Node clicked:', d.name) // Debug log
-	
-	if (event.shiftKey) {
-		// Multi-select for connections
-		toggleNodeSelection(d.id)
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	} else {
-		// Single click to edit
-		openNodeEditor(d)
-	}
-}
-
-
-	function updateLinks(g) {
-		// Update all link positions
-		g.selectAll('.link line')
-			.attr('x1', d => getNodeById(d.source).x)
-			.attr('y1', d => getNodeById(d.source).y)
-			.attr('x2', d => getNodeById(d.target).x)
-			.attr('y2', d => getNodeById(d.target).y)
-
-		g.selectAll('.link text')
-			.attr('x', d => (getNodeById(d.source).x + getNodeById(d.target).x) / 2)
-			.attr('y', d => (getNodeById(d.source).y + getNodeById(d.target).y) / 2)
-	}
-
-	function getNodeById(id: string): MechanicNode {
-		return nodes.find(n => n.id === id) || nodes[0]
-	}
-
-	function toggleNodeSelection(nodeId: string) {
-		if (selectedNodes.includes(nodeId)) {
-			selectedNodes = selectedNodes.filter(id => id !== nodeId)
-		} else {
-			selectedNodes = [...selectedNodes, nodeId]
-		}
-	}
-
-	function createNewNode(x: number, y: number) {
-		editingNode = {
-			id: `node_${Date.now()}`,
-			name: '',
-			description: '',
-			category: 'Core Mechanics',
-			mechanicType: 'core',
-			details: {},
-			x,
-			y
-		}
-		isNewNode = true
-		showModal = true
-		resetModalForm()
-	}
-
-    function openNodeEditor(node) {
-        console.log('Opening editor for node:', node) // Add debug log
+          return { 
+            ...edge, 
+            baseLabel,
+            label: generateEdgeLabel(baseLabel, edge.resources || []),
+            resources: edge.resources || [],
+            type: edge.type || 'smoothstep'
+          };
+        }
         
-        editingNode = node
-        isNewNode = false
-        showModal = true
-        loadModalForm(node)
-        
-        console.log('showModal is now:', showModal) // Add debug log
+        if (!edge.resources) {
+          return { ...edge, resources: [] };
+        }
+        if (!edge.type) {
+          return { ...edge, type: 'smoothstep' };
+        }
+        return edge;
+      });
     }
+    previousEdgeCount = edges.length;
+  });
 
-    function loadModalForm(node) {
-        console.log('Loading form data:', node) // Add debug log
-        
-        nodeName = node.name
-        nodeDescription = node.description
-        nodeCategory = node.category
-        nodeMechanicType = node.mechanicType
-        nodeTrigger = node.details?.trigger || ''
-        nodeEffect = node.details?.effect || ''
-        nodeCost = node.details?.cost || ''
-        nodeRequirements = node.details?.requirements || ''
-        nodeExamples = node.details?.examples || ''
+  // Get selected edge
+  $effect(() => {
+    const selected = edges.find(e => e.selected);
+    if (selected && selected.id !== selectedEdgeId) {
+      selectedEdgeId = selected.id;
+      edgeType = selected.type || 'smoothstep';
+    } else if (!selected) {
+      selectedEdgeId = null;
+      showEdgeEditor = false;
     }
+  });
 
-	function resetModalForm() {
-		nodeName = ''
-		nodeDescription = ''
-		nodeCategory = 'Core Mechanics'
-		nodeMechanicType = 'core'
-		nodeTrigger = ''
-		nodeEffect = ''
-		nodeCost = ''
-		nodeRequirements = ''
-		nodeExamples = ''
-	}
+  function onDragStart(event: DragEvent, nodeType: string) {
+    if (!event.dataTransfer) return;
+    
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('application/svelteflow', nodeType);
+    draggedType = nodeType;
+  }
 
-	function saveNode() {
-		if (!editingNode || !nodeName.trim()) return
-
-		const nodeData = {
-			...editingNode,
-			name: nodeName.trim(),
-			description: nodeDescription.trim(),
-			category: nodeCategory,
-			mechanicType: nodeMechanicType,
-			details: {
-				trigger: nodeTrigger.trim(),
-				effect: nodeEffect.trim(),
-				cost: nodeCost.trim(),
-				requirements: nodeRequirements.trim(),
-				examples: nodeExamples.trim()
-			},
-			color: getNodeColor(nodeMechanicType)
-		}
-
-		if (isNewNode) {
-			nodes = [...nodes, nodeData]
-		} else {
-			const nodeIndex = nodes.findIndex(n => n.id === editingNode.id)
-			if (nodeIndex >= 0) {
-				nodes[nodeIndex] = nodeData
-				nodes = nodes
-			}
-		}
-
-		showModal = false
-		editingNode = null
-		
-		// Refresh visualization
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	}
-
-	function deleteNode(nodeId: string) {
-		nodes = nodes.filter(n => n.id !== nodeId)
-		links = links.filter(l => l.source !== nodeId && l.target !== nodeId)
-		selectedNodes = selectedNodes.filter(id => id !== nodeId)
-		
-		// Refresh visualization
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	}
-
-    function showDeleteConnectionConfirm(connection) {
-	const sourceNode = getNodeById(connection.source)
-	const targetNode = getNodeById(connection.target)
-	
-	confirmMessage = `Delete connection: "${sourceNode.name}" ${connection.relationship} "${targetNode.name}"?`
-	confirmAction = () => deleteConnection(connection.id)
-	showConfirmModal = true
-}
-
-function showDeleteNodeConfirm(node) {
-	confirmMessage = `Delete mechanic: "${node.name}"?`
-	confirmAction = () => deleteNode(node.id)
-	showConfirmModal = true
-}
-
-function executeConfirmAction() {
-	if (confirmAction) {
-		confirmAction()
-	}
-	closeConfirmModal()
-}
-
-function closeConfirmModal() {
-	showConfirmModal = false
-	confirmMessage = ''
-	confirmAction = null
-}
-
-    function openConnectionManager() {
-	    showConnectionManager = true
+  function onDragOver(event: DragEvent) {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
     }
+  }
 
-    function closeConnectionManager() {
-        showConnectionManager = false
+  function onDrop(event: DragEvent) {
+    event.preventDefault();
+    
+    const type = event.dataTransfer?.getData('application/svelteflow');
+    if (!type) return;
+
+    const flowBounds = event.currentTarget?.getBoundingClientRect();
+    if (!flowBounds) return;
+
+    const position = {
+      x: event.clientX - flowBounds.left - 75,
+      y: event.clientY - flowBounds.top - 75
+    };
+
+    const newNode: any = {
+      id: `node-${nodeIdCounter++}`,
+      type,
+      data: { 
+        label: type === 'start' ? 'Start' : 
+               type === 'end' ? 'End' : 
+               type === 'decision' ? 'Decision?' : 
+               type === 'loop' ? 'For Each...' :
+               type === 'process' ? 'New Process' : 
+               undefined,
+        icon: type === 'process' ? '⚙️' : type === 'decision' ? '❓' : undefined,
+        text: type === 'comment' ? '' : undefined
+      },
+      position
+    };
+
+    nodes = [...nodes, newNode];
+    draggedType = null;
+  }
+
+  function openEdgeLabelEditor() {
+    if (!selectedEdgeId) return;
+    const edge = edges.find(e => e.id === selectedEdgeId);
+    if (edge) {
+      edgeLabelInput = edge.baseLabel || '';
+      edgeResources = [...(edge.resources || [])];
+      edgeType = edge.type || 'smoothstep';
+      showEdgeEditor = true;
     }
+  }
 
-    function deleteConnection(connectionId) {
-        links = links.filter(l => l.id !== connectionId)
-        
-        // Refresh visualization
-        const svg = d3.select(svgElement)
-        const g = svg.select('g')
-        updateVisualization(g)
+  function changeEdgeType(newType: string) {
+    if (selectedEdgeId) {
+      edges = edges.map(edge => 
+        edge.id === selectedEdgeId 
+          ? { ...edge, type: newType }
+          : edge
+      );
+      edgeType = newType as any;
     }
+  }
 
-	function openConnectionModal() {
-		if (selectedNodes.length !== 2) {
-			alert('Please select exactly 2 nodes (Shift+click) to create a connection')
-			return
-		}
-		
-		connectionSource = selectedNodes[0]
-		connectionTarget = selectedNodes[1]
-		connectionRelationship = 'requires'
-		connectionDescription = ''
-		showConnectionModal = true
-	}
+  function addResource() {
+    if (!newResourceIcon || !newResourceValue) return;
+    
+    edgeResources = [...edgeResources, {
+      icon: newResourceIcon,
+      value: newResourceValue,
+      color: newResourceColor
+    }];
+    
+    newResourceIcon = '';
+    newResourceValue = '';
+    newResourceColor = '#D4A574';
+  }
 
-	function saveConnection() {
-		if (!connectionSource || !connectionTarget || !connectionRelationship) return
+  function useResourcePreset(preset: any) {
+    newResourceIcon = preset.icon;
+    newResourceColor = preset.color;
+  }
 
-		const newLink: MechanicLink = {
-			id: `link_${Date.now()}`,
-			source: connectionSource,
-			target: connectionTarget,
-			relationship: connectionRelationship,
-			description: connectionDescription.trim()
-		}
+  function removeResource(index: number) {
+    edgeResources = edgeResources.filter((_, i) => i !== index);
+  }
 
-		links = [...links, newLink]
-		selectedNodes = []
-		showConnectionModal = false
-		
-		// Refresh visualization
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	}
+  function saveEdgeLabel() {
+    if (selectedEdgeId) {
+      const newLabel = generateEdgeLabel(edgeLabelInput, edgeResources);
+      edges = edges.map(edge => 
+        edge.id === selectedEdgeId 
+          ? { ...edge, baseLabel: edgeLabelInput, resources: edgeResources, label: newLabel, type: edgeType }
+          : edge
+      );
+    }
+    closeEdgeEditor();
+  }
 
-	function clearSelection() {
-		selectedNodes = []
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	}
+  function deleteSelectedEdge() {
+    if (selectedEdgeId) {
+      edges = edges.filter(edge => edge.id !== selectedEdgeId);
+    }
+    closeEdgeEditor();
+  }
 
-	function resetView() {
-		const svg = d3.select(svgElement)
-		svg.transition().duration(750).call(
-			d3.zoom().transform,
-			d3.zoomIdentity
-		)
-	}
+  function closeEdgeEditor() {
+    showEdgeEditor = false;
+    edgeLabelInput = '';
+    edgeResources = [];
+    newResourceIcon = '';
+    newResourceValue = '';
+  }
 
-	// Predefined templates
-	function loadCardGameTemplate() {
-		nodes = [
-			{
-				id: 'deck',
-				name: 'Deck',
-				description: 'Collection of cards',
-				category: 'Game Components',
-				mechanicType: 'component',
-				details: { examples: 'Standard 52-card deck, custom cards' },
-				x: 200, y: 300, color: '#4caf50'
-			},
-			{
-				id: 'hand',
-				name: 'Player Hand',
-				description: 'Cards held by player',
-				category: 'Game Components',
-				mechanicType: 'component',
-				details: { requirements: 'Hand size limits' },
-				x: 400, y: 200, color: '#4caf50'
-			},
-			{
-				id: 'draw',
-				name: 'Draw Cards',
-				description: 'Take cards from deck',
-				category: 'Player Actions',
-				mechanicType: 'action',
-				details: { trigger: 'Start of turn', cost: 'Free action' },
-				x: 300, y: 100, color: '#ff9800'
-			},
-			{
-				id: 'play',
-				name: 'Play Card',
-				description: 'Use a card from hand',
-				category: 'Player Actions',
-				mechanicType: 'action',
-				details: { cost: 'Card from hand', effect: 'Varies by card' },
-				x: 500, y: 100, color: '#ff9800'
-			},
-			{
-				id: 'discard',
-				name: 'Discard Pile',
-				description: 'Used cards pile',
-				category: 'Game Components',
-				mechanicType: 'component',
-				details: { trigger: 'Cards played or discarded' },
-				x: 600, y: 300, color: '#4caf50'
-			}
-		]
-		
-		links = [
-			{ id: 'deck-hand', source: 'deck', target: 'hand', relationship: 'produces' },
-			{ id: 'draw-deck', source: 'draw', target: 'deck', relationship: 'requires' },
-			{ id: 'play-hand', source: 'play', target: 'hand', relationship: 'requires' },
-			{ id: 'play-discard', source: 'play', target: 'discard', relationship: 'produces' }
-		]
-		
-		selectedNodes = []
-		const svg = d3.select(svgElement)
-		const g = svg.select('g')
-		updateVisualization(g)
-	}
+  function formatLastSaved() {
+    if (!lastSavedAt) return '';
+    
+    const now = new Date();
+    const diffMs = now.getTime() - lastSavedAt.getTime();
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    
+    if (diffSecs < 10) return 'Saved just now';
+    if (diffSecs < 60) return `Saved ${diffSecs}s ago`;
+    if (diffMins < 60) return `Saved ${diffMins}m ago`;
+    
+    return `Saved at ${lastSavedAt.toLocaleTimeString()}`;
+  }
+
+  // Update last saved time display every 10 seconds
+  $effect(() => {
+    const interval = setInterval(() => {
+      if (lastSavedAt) {
+        // Force re-render
+        lastSavedAt = lastSavedAt;
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  });
 </script>
 
-<!-- Rest of your template stays exactly the same -->
-<div style="padding: 2rem;">
-	<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
-		<h2 style="margin: 0;">⚙️ Game Mechanics Flow Chart</h2>
-		<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-			<button 
-				on:click={loadCardGameTemplate}
-				style="padding: 0.5rem 1rem; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-			>
-				📋 Card Game Template
-			</button>
-			<button 
-				on:click={openConnectionModal}
-				style="padding: 0.5rem 1rem; background: #ff9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-			>
-				🔗 Connect Nodes ({selectedNodes.length})
-			</button>
-            	<button 
-                    on:click={openConnectionManager}
-                    style="padding: 0.5rem 1rem; background: #9c27b0; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-                >
-                    🔗 Manage Connections
-                </button>
-			<button 
-				on:click={clearSelection}
-				style="padding: 0.5rem 1rem; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-			>
-				Clear Selection
-			</button>
-			<button 
-				on:click={resetView}
-				style="padding: 0.5rem 1rem; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-			>
-				Reset View
-			</button>
-			<button 
-				on:click={() => createNewNode(450, 350)}
-				style="padding: 0.5rem 1rem; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.875rem;"
-			>
-				+ Add Mechanic
-			</button>
-		</div>
-	</div>
-
-	<div style="background: white; border-radius: 8px; border: 1px solid #ddd; position: relative; overflow: hidden;">
-		<svg bind:this={svgElement} style="display: block;"></svg>
-		
-        <!-- Update the instructions overlay -->
-        <div style="position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.95); padding: 1rem; border-radius: 6px; font-size: 0.8rem; max-width: 280px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            <h4 style="margin: 0 0 0.5rem 0; color: #1976d2;">Quick Guide:</h4>
-            <ul style="margin: 0; padding-left: 1.2rem; line-height: 1.4;">
-                <li><strong>Double-click</strong>: Add new mechanic</li>
-                <li><strong>Click node</strong>: Edit mechanic details</li>
-                <li><strong>Drag</strong>: Move node</li>
-                <li><strong>Shift+Click</strong>: Select multiple nodes</li>
-                <li><strong>Connect button</strong>: Link 2 selected nodes</li>
-                <li><strong>Click connection</strong>: Delete connection</li>
-                <li><strong>Right-click</strong>: Delete mechanic/connection</li>
-            </ul>
+<div class="mechanics-container">
+  <!-- Header -->
+  <div class="mechanics-header">
+    <div class="header-content">
+      <div>
+        <h2 class="header-title">⚙️ Game Mechanics - {flowName}</h2>
+        <div class="header-meta">
+          {#if flowDescription}
+            <p class="flow-description">{flowDescription}</p>
+          {/if}
+          {#if currentFlowId && lastSavedAt}
+            <p class="autosave-indicator">
+              <span class="status-dot"></span>
+              {formatLastSaved()}
+            </p>
+          {/if}
         </div>
+      </div>
+      <div class="header-actions">
+        {#if currentFlowId}
+          <label class="autosave-toggle">
+            <input 
+              type="checkbox" 
+              bind:checked={autoSaveEnabled}
+            />
+            Auto-save
+          </label>
+        {/if}
+        <button 
+          on:click|stopPropagation={newFlow}
+          type="button"
+          class="btn btn-secondary"
+        >
+          🆕 New Flow
+        </button>
+        <button 
+          on:click|stopPropagation={() => showLoadDialog = true}
+          type="button"
+          class="btn btn-accent"
+        >
+          📂 Load Flow
+        </button>
+        <button 
+          on:click|stopPropagation={() => showSaveDialog = true}
+          type="button"
+          class="btn btn-primary"
+        >
+          💾 Save Flow
+        </button>
+      </div>
+    </div>
+  </div>
 
-		<!-- Legend -->
-		<div style="position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,0.95); padding: 1rem; border-radius: 6px; font-size: 0.8rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-			<h4 style="margin: 0 0 0.5rem 0; color: #1976d2;">Node Types:</h4>
-			{#each nodeTypes as type}
-				<div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-					<div style="width: 12px; height: 12px; background: {type.color}; border-radius: 2px;"></div>
-					<span style="font-size: 0.75rem;">{type.label}</span>
-				</div>
-			{/each}
-		</div>
-	</div>
+  <!-- Main Content: Sidebar + Canvas -->
+  <div class="mechanics-main">
+    <!-- Left Sidebar -->
+    <div class="sidebar">
+      <h3 class="sidebar-title">Node Types</h3>
+      <p class="sidebar-subtitle">Drag nodes onto the canvas</p>
+      
+      <div class="node-templates">
+        {#each nodeTemplates as template}
+          <div 
+            draggable="true"
+            on:dragstart={(e) => onDragStart(e, template.type)}
+            class="node-template"
+          >
+            <div class="template-header">
+              <span class="template-icon">{template.icon}</span>
+              <span class="template-label">{template.label}</span>
+            </div>
+            <p class="template-description">{template.description}</p>
+          </div>
+        {/each}
+      </div>
+
+      <div class="sidebar-tips">
+        <h4 class="tips-title">Tips</h4>
+        <ul class="tips-list">
+          <li>Drag nodes from here to the canvas</li>
+          <li>Click edges to change line style</li>
+          <li>Add resource flows to edges</li>
+          <li>Loop nodes have 2 outputs</li>
+          <li>Double-click to edit nodes</li>
+          {#if autoSaveEnabled && currentFlowId}
+            <li class="tip-success">✓ Auto-save is enabled</li>
+          {/if}
+        </ul>
+      </div>
+    </div>
+
+    <!-- Flow Canvas -->
+    <div 
+      class="canvas-container"
+      on:drop={onDrop}
+      on:dragover={onDragOver}
+    >
+      <SvelteFlow 
+        bind:nodes 
+        bind:edges 
+        {nodeTypes}
+        {defaultEdgeOptions}
+        edgesReconnectable={true}
+        fitView
+      >
+        <Controls />
+        <Background />
+        <MiniMap />
+        
+        <Panel position="top-right">
+          <div class="stats-panel">
+            <div class="stats-text">
+              <strong>{nodes.length}</strong> nodes • <strong>{edges.length}</strong> connections
+            </div>
+          </div>
+        </Panel>
+
+        {#if selectedEdgeId}
+          <Panel position="top-center">
+            <div class="edge-toolbar">
+              <button 
+                on:click={openEdgeLabelEditor}
+                class="btn btn-primary btn-sm"
+              >
+                ✏️ Edit Connection
+              </button>
+              
+              <!-- Quick edge type selector -->
+              <div class="edge-type-selector">
+                {#each edgeTypes as type}
+                  <button
+                    on:click={() => changeEdgeType(type.value)}
+                    title={type.label}
+                    class="edge-type-btn"
+                    class:active={edgeType === type.value}
+                  >
+                    {type.icon}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          </Panel>
+        {/if}
+      </SvelteFlow>
+
+      <!-- Save Dialog -->
+      {#if showSaveDialog}
+        <div class="dialog-overlay" on:click={() => showSaveDialog = false}></div>
+        <div class="dialog">
+          <h3 class="dialog-title">Save Flow</h3>
+          
+          <div class="form-group">
+            <label class="form-label">Flow Name</label>
+            <input
+              type="text"
+              bind:value={flowName}
+              placeholder="e.g., Turn Sequence"
+              class="input nodrag"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description (Optional)</label>
+            <textarea
+              bind:value={flowDescription}
+              placeholder="Describe this flow..."
+              rows="3"
+              class="input nodrag"
+            ></textarea>
+          </div>
+
+          {#if saveMessage}
+            <div class="save-message" class:error={saveMessage.includes('Error')}>
+              {saveMessage}
+            </div>
+          {/if}
+
+          <div class="dialog-actions">
+            <button 
+              on:click={saveFlow} 
+              disabled={isSaving}
+              class="btn btn-primary nodrag"
+              style="opacity: {isSaving ? 0.6 : 1};"
+            >
+              {isSaving ? 'Saving...' : '💾 Save'}
+            </button>
+            <button 
+              on:click={() => showSaveDialog = false}
+              class="btn btn-secondary nodrag"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Load Dialog -->
+      {#if showLoadDialog}
+        <div class="dialog-overlay" on:click={() => showLoadDialog = false}></div>
+        <div class="dialog dialog-wide">
+          <h3 class="dialog-title">Load Flow</h3>
+          
+          {#if savedFlows.length === 0}
+            <div class="empty-state">
+              <div class="empty-icon">📂</div>
+              <div class="empty-title">No saved flows yet</div>
+              <p class="empty-description">Create and save your first flow!</p>
+            </div>
+          {:else}
+            <div class="flows-list">
+              {#each savedFlows as flow}
+                <div 
+                  class="flow-item"
+                  class:active={currentFlowId === flow.id}
+                  on:click={() => loadFlowById(flow.id)}
+                >
+                  <div class="flow-content">
+                    <div class="flow-name">{flow.name}</div>
+                    {#if flow.description}
+                      <div class="flow-description">{flow.description}</div>
+                    {/if}
+                    <div class="flow-meta">
+                      Updated: {new Date(flow.updated_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    on:click|stopPropagation={() => deleteFlow(flow.id)}
+                    class="btn-delete nodrag"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="dialog-actions">
+            <button 
+              on:click={() => showLoadDialog = false}
+              class="btn btn-secondary nodrag"
+              style="width: 100%;"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      <!-- Edge Editor -->
+      {#if showEdgeEditor}
+        <div class="dialog-overlay" on:click={closeEdgeEditor}></div>
+        <div class="edge-editor">
+          <h3 class="dialog-title">Edit Connection</h3>
+          
+          <!-- Edge Type Section -->
+          <div class="form-group">
+            <label class="form-label">Line Style</label>
+            <div class="edge-type-grid">
+              {#each edgeTypes as type}
+                <button
+                  on:click={() => changeEdgeType(type.value)}
+                  class="edge-type-card nodrag"
+                  class:active={edgeType === type.value}
+                >
+                  <span class="type-icon">{type.icon}</span>
+                  <span class="type-label">{type.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Label Section -->
+          <div class="form-group">
+            <label class="form-label">Label</label>
+            <input
+              type="text"
+              bind:value={edgeLabelInput}
+              placeholder="e.g., Yes, No, then..."
+              class="input nodrag"
+              on:keydown={(e) => {
+                if (e.key === 'Enter') saveEdgeLabel();
+                if (e.key === 'Escape') closeEdgeEditor();
+              }}
+            />
+          </div>
+
+          <!-- Resource Flow Section -->
+          <div class="form-group">
+            <label class="form-label">Resource Flows</label>
+            
+            <!-- Existing Resources -->
+            {#if edgeResources.length > 0}
+              <div class="resources-list">
+                {#each edgeResources as resource, index}
+                  <div 
+                    class="resource-tag"
+                    style="background: {resource.color};"
+                  >
+                    <span>{resource.icon} {resource.value}</span>
+                    <button
+                      on:click={() => removeResource(index)}
+                      class="resource-remove nodrag"
+                    >
+                      ×
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Resource Presets -->
+            <div class="presets-section">
+              <div class="presets-label">Quick add:</div>
+              <div class="presets-grid">
+                {#each resourcePresets as preset}
+                  <button
+                    on:click={() => useResourcePreset(preset)}
+                    class="preset-btn nodrag"
+                    style="background: {preset.color};"
+                    title={preset.label}
+                  >
+                    {preset.icon}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <!-- Add New Resource -->
+            <div class="resource-input-group">
+              <input
+                type="text"
+                bind:value={newResourceIcon}
+                placeholder="Icon (e.g., 💰)"
+                class="input input-sm nodrag"
+              />
+              <input
+                type="text"
+                bind:value={newResourceValue}
+                placeholder="Value (e.g., +5)"
+                class="input input-sm nodrag"
+              />
+              <input
+                type="color"
+                bind:value={newResourceColor}
+                class="color-input nodrag"
+              />
+              <button
+                on:click={addResource}
+                class="btn btn-primary btn-sm nodrag"
+              >
+                + Add
+              </button>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="dialog-actions">
+            <button on:click={saveEdgeLabel} class="btn btn-primary">
+              ✓ Save
+            </button>
+            <button on:click={closeEdgeEditor} class="btn btn-secondary">
+              Cancel
+            </button>
+            <button on:click={deleteSelectedEdge} class="btn-delete-edge">
+              🗑️ Delete
+            </button>
+          </div>
+        </div>
+      {/if}
+    </div>
+  </div>
 </div>
 
-<!-- Enhanced Node Editor Modal -->
-{#if showModal && editingNode}
-	<div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000;">
-		<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 600px; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
-			<h3 style="margin: 0 0 1.5rem 0; color: #1976d2;">
-				{isNewNode ? 'Add New Mechanic' : 'Edit Mechanic'}
-			</h3>
+<style>
+  /* Container */
+  .mechanics-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--warm-gray-700);
+  }
 
-			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-				<div>
-					<label for="node-name" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-						Name *
-					</label>
-					<input
-						id="node-name"
-						type="text"
-						bind:value={nodeName}
-						placeholder="e.g., Draw Card, Health Points"
-						style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px;"
-					/>
-				</div>
+  /* Header */
+  .mechanics-header {
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--warm-gray-600);
+  }
 
-				<div>
-					<label for="node-type" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-						Type *
-					</label>
-					<select
-						id="node-type"
-						bind:value={nodeMechanicType}
-						style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px;"
-					>
-						{#each nodeTypes as type}
-							<option value={type.value}>{type.label}</option>
-						{/each}
-					</select>
-				</div>
-			</div>
+  .header-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 2rem;
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label for="node-category" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Category
-				</label>
-				<select
-					id="node-category"
-					bind:value={nodeCategory}
-					style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px;"
-				>
-					{#each nodeCategories as category}
-						<option value={category}>{category}</option>
-					{/each}
-				</select>
-			</div>
+  .header-title {
+    margin: 0 0 0.5rem 0;
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label for="node-description" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Description
-				</label>
-				<textarea
-					id="node-description"
-					bind:value={nodeDescription}
-					placeholder="Describe what this mechanic does..."
-					rows="3"
-					style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px; resize: vertical;"
-				></textarea>
-			</div>
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
 
-			<!-- Detailed fields based on type -->
-			<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-				<div>
-					<label for="node-trigger" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-						Trigger/When
-					</label>
-					<input
-						id="node-trigger"
-						type="text"
-						bind:value={nodeTrigger}
-						placeholder="When does this activate?"
-						style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;"
-					/>
-				</div>
+  .flow-description {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+  }
 
-				<div>
-					<label for="node-cost" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-						Cost/Resource
-					</label>
-					<input
-						id="node-cost"
-						type="text"
-						bind:value={nodeCost}
-						placeholder="What does it cost?"
-						style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;"
-					/>
-				</div>
-			</div>
+  .autosave-indicator {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-success);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label for="node-effect" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Effect/What Happens
-				</label>
-				<input
-					id="node-effect"
-					type="text"
-					bind:value={nodeEffect}
-					placeholder="What is the result or effect?"
-					style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;"
-				/>
-			</div>
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--color-success);
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(159, 179, 150, 0.5);
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label for="node-requirements" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Requirements/Conditions
-				</label>
-				<input
-					id="node-requirements"
-					type="text"
-					bind:value={nodeRequirements}
-					placeholder="What conditions must be met?"
-					style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;"
-				/>
-			</div>
+  .header-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
 
-			<div style="margin-bottom: 1.5rem;">
-				<label for="node-examples" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Examples
-				</label>
-				<input
-					id="node-examples"
-					type="text"
-					bind:value={nodeExamples}
-					placeholder="Specific examples or variations"
-					style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9rem;"
-				/>
-			</div>
+  .autosave-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
 
-			<div style="display: flex; justify-content: flex-end; gap: 1rem;">
-				<button 
-					on:click={() => showModal = false}
-					style="padding: 0.75rem 1.5rem; background: #f5f5f5; color: #333; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;"
-				>
-					Cancel
-				</button>
-				<button 
-					on:click={saveNode}
-					disabled={!nodeName.trim()}
-					style="padding: 0.75rem 1.5rem; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer; opacity: {nodeName.trim() ? 1 : 0.5};"
-				>
-					{isNewNode ? 'Add Mechanic' : 'Save Changes'}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+  .autosave-toggle input {
+    cursor: pointer;
+  }
 
-<!-- Connection Modal -->
-{#if showConnectionModal}
-	<div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000;">
-		<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
-			<h3 style="margin: 0 0 1.5rem 0; color: #1976d2;">Create Connection</h3>
+  /* Main Layout */
+  .mechanics-main {
+    flex: 1;
+    display: flex;
+    background: var(--warm-gray-600);
+    overflow: hidden;
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					From: {nodes.find(n => n.id === connectionSource)?.name}
-				</label>
-				<label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					To: {nodes.find(n => n.id === connectionTarget)?.name}
-				</label>
-			</div>
+  /* Sidebar */
+  .sidebar {
+    width: 280px;
+    background: var(--warm-gray-500);
+    border-right: 1px solid rgba(227, 223, 215, 0.2);
+    padding: 1.5rem;
+    overflow-y: auto;
+  }
 
-			<div style="margin-bottom: 1rem;">
-				<label for="relationship" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Relationship *
-				</label>
-				<select
-					id="relationship"
-					bind:value={connectionRelationship}
-					style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px;"
-				>
-					{#each relationshipTypes as type}
-						<option value={type}>{type}</option>
-					{/each}
-				</select>
-			</div>
+  .sidebar-title {
+    margin: 0 0 0.5rem 0;
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+  }
 
-			<div style="margin-bottom: 1.5rem;">
-				<label for="connection-desc" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-					Description (optional)
-				</label>
-				<input
-					id="connection-desc"
-					type="text"
-					bind:value={connectionDescription}
-					placeholder="Describe the relationship..."
-					style="width: 100%; padding: 0.75rem; border: 1px solid #ccc; border-radius: 4px;"
-				/>
-			</div>
+  .sidebar-subtitle {
+    margin: 0 0 1.5rem 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-tertiary);
+  }
 
-			<div style="display: flex; justify-content: flex-end; gap: 1rem;">
-				<button 
-					on:click={() => showConnectionModal = false}
-					style="padding: 0.75rem 1.5rem; background: #f5f5f5; color: #333; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;"
-				>
-					Cancel
-				</button>
-				<button 
-					on:click={saveConnection}
-					style="padding: 0.75rem 1.5rem; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;"
-				>
-					Create Connection
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+  .node-templates {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
 
-<!-- Confirmation Modal -->
-{#if showConfirmModal}
-	<div style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1001;">
-		<div style="background: white; padding: 2rem; border-radius: 12px; width: 90%; max-width: 450px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
-			<h3 style="margin: 0 0 1rem 0; color: #f44336; display: flex; align-items: center; gap: 0.5rem;">
-				⚠️ Confirm Deletion
-			</h3>
+  .node-template {
+    background: var(--warm-gray-400);
+    border: 2px dashed rgba(227, 223, 215, 0.3);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    cursor: grab;
+    transition: all var(--transition-fast);
+  }
 
-			<p style="margin: 0 0 2rem 0; color: #333; line-height: 1.5;">
-				{confirmMessage}
-			</p>
+  .node-template:hover {
+    border-color: var(--color-primary);
+    background: var(--warm-gray-300);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+  }
 
-			<div style="display: flex; justify-content: flex-end; gap: 1rem;">
-				<button 
-					on:click={closeConfirmModal}
-					style="padding: 0.75rem 1.5rem; background: #f5f5f5; color: #333; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;"
-				>
-					Cancel
-				</button>
-				<button 
-					on:click={executeConfirmAction}
-					style="padding: 0.75rem 1.5rem; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;"
-				>
-					Delete
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+  .node-template:active {
+    cursor: grabbing;
+  }
+
+  .template-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .template-icon {
+    font-size: 1.25rem;
+  }
+
+  .template-label {
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+  }
+
+  .template-description {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+    line-height: var(--line-height-normal);
+  }
+
+  .sidebar-tips {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(227, 223, 215, 0.2);
+  }
+
+  .tips-title {
+    margin: 0 0 0.75rem 0;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+  }
+
+  .tips-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+    line-height: 1.6;
+  }
+
+  .tips-list li {
+    margin-bottom: 0.5rem;
+  }
+
+  .tip-success {
+    color: var(--color-success);
+  }
+
+  /* Canvas */
+  .canvas-container {
+    flex: 1;
+    position: relative;
+  }
+
+  .stats-panel {
+    background: var(--warm-gray-500);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .stats-text {
+    font-size: var(--font-size-sm);
+    color: var(--warm-gray-200);
+  }
+
+  .edge-toolbar {
+    background: var(--warm-gray-500);
+    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-primary);
+    box-shadow: var(--shadow-md);
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+  }
+
+  .edge-type-selector {
+    display: flex;
+    gap: 0.25rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid rgba(227, 223, 215, 0.2);
+  }
+
+  .edge-type-btn {
+    background: var(--warm-gray-400);
+    color: var(--warm-gray-100);
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all var(--transition-fast);
+  }
+
+  .edge-type-btn:hover {
+    background: var(--warm-gray-300);
+    border-color: rgba(227, 223, 215, 0.3);
+  }
+
+  .edge-type-btn.active {
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
+  }
+
+  /* Dialogs */
+  .dialog-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(36, 33, 28, 0.7);
+    z-index: 100;
+    backdrop-filter: blur(2px);
+  }
+
+  .dialog {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--warm-gray-500);
+    padding: 2rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    box-shadow: var(--shadow-xl);
+    min-width: 400px;
+    max-width: 600px;
+    z-index: 101;
+  }
+
+  .dialog-wide {
+    min-width: 500px;
+  }
+
+  .dialog-title {
+    margin: 0 0 1.5rem 0;
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+  }
+
+  .form-group {
+    margin-bottom: 1.25rem;
+  }
+
+  .form-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .save-message {
+    margin-bottom: 1.25rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-success-light);
+    color: var(--color-success);
+    border: 1px solid var(--color-success);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+  }
+
+  .save-message.error {
+    background: var(--color-error-light);
+    color: var(--color-error);
+    border-color: var(--color-error);
+  }
+
+  .dialog-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+
+  /* Flows List */
+  .flows-list {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .flow-item {
+    padding: 1rem;
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    background: var(--warm-gray-400);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .flow-item:hover {
+    border-color: rgba(227, 223, 215, 0.3);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+    background: var(--warm-gray-300);
+  }
+
+  .flow-item.active {
+    background: var(--color-primary-light);
+    border-color: var(--color-primary);
+  }
+
+  .flow-content {
+    flex: 1;
+  }
+
+  .flow-name {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: 0.25rem;
+    color: var(--color-text-primary);
+  }
+
+  .flow-item .flow-description {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin-bottom: 0.5rem;
+  }
+
+  .flow-meta {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .btn-delete {
+    background: var(--color-error-light);
+    color: var(--color-error);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-sm);
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    font-size: var(--font-size-xs);
+    transition: all var(--transition-fast);
+  }
+
+  .btn-delete:hover {
+    background: var(--color-error);
+    color: white;
+  }
+
+  /* Edge Editor */
+  .edge-editor {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--warm-gray-500);
+    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    border: 2px solid var(--color-primary);
+    box-shadow: var(--shadow-xl);
+    min-width: 450px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 11;
+  }
+
+  .edge-type-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  .edge-type-card {
+    background: var(--warm-gray-400);
+    border: 2px solid rgba(227, 223, 215, 0.2);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all var(--transition-fast);
+  }
+
+  .edge-type-card:hover {
+    background: var(--warm-gray-300);
+    border-color: rgba(227, 223, 215, 0.3);
+  }
+
+  .edge-type-card.active {
+    background: var(--color-primary-light);
+    border-color: var(--color-primary);
+  }
+
+  .type-icon {
+    font-size: 1.2rem;
+  }
+
+  .type-label {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+  }
+
+  .edge-type-card.active .type-label {
+    color: var(--color-primary);
+  }
+
+  .resources-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .resource-tag {
+    color: white;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .resource-remove {
+    background: rgba(255,255,255,0.3);
+    border: none;
+    color: white;
+    cursor: pointer;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: bold;
+    transition: all var(--transition-fast);
+  }
+
+  .resource-remove:hover {
+    background: rgba(255,255,255,0.5);
+  }
+
+  .presets-section {
+    margin-bottom: 1rem;
+  }
+
+  .presets-label {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-tertiary);
+    margin-bottom: 0.5rem;
+  }
+
+  .presets-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .preset-btn {
+    color: white;
+    border: none;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .preset-btn:hover {
+    transform: scale(1.1);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .resource-input-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+  }
+
+  .input-sm {
+    flex: 1;
+  }
+
+  .color-input {
+    width: 50px;
+    height: 38px;
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .btn-delete-edge {
+    background: var(--color-error-light);
+    color: var(--color-error);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    transition: all var(--transition-fast);
+  }
+
+  .btn-delete-edge:hover {
+    background: var(--color-error);
+    color: white;
+  }
+
+  /* Scrollbar */
+  .sidebar::-webkit-scrollbar,
+  .flows-list::-webkit-scrollbar,
+  .edge-editor::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .sidebar::-webkit-scrollbar-track,
+  .flows-list::-webkit-scrollbar-track,
+  .edge-editor::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar::-webkit-scrollbar-thumb,
+  .flows-list::-webkit-scrollbar-thumb,
+  .edge-editor::-webkit-scrollbar-thumb {
+    background: rgba(159, 179, 150, 0.25);
+    border-radius: var(--radius-sm);
+  }
+
+  .sidebar::-webkit-scrollbar-thumb:hover,
+  .flows-list::-webkit-scrollbar-thumb:hover,
+  .edge-editor::-webkit-scrollbar-thumb:hover {
+    background: rgba(159, 179, 150, 0.35);
+  }
+
+  /* SvelteFlow Dark Mode */
+  :global(.svelte-flow) {
+    background: var(--warm-gray-800) !important;
+  }
+
+  :global(.svelte-flow__background) {
+    background: var(--warm-gray-800) !important;
+  }
+
+  :global(.svelte-flow__background-pattern) {
+    stroke: rgba(227, 223, 215, 0.1) !important;
+  }
+
+  :global(.svelte-flow__edge-path) {
+    stroke: var(--warm-gray-400) !important;
+  }
+
+  :global(.svelte-flow__edge.selected .svelte-flow__edge-path) {
+    stroke: var(--color-primary) !important;
+  }
+
+  :global(.svelte-flow__edge-text) {
+    fill: var(--warm-gray-200) !important;
+  }
+
+  :global(.svelte-flow__edge-textbg) {
+    fill: var(--warm-gray-700) !important;
+  }
+
+  :global(.svelte-flow__controls) {
+    background: var(--warm-gray-600) !important;
+    border: 1px solid rgba(227, 223, 215, 0.2) !important;
+    border-radius: var(--radius-md) !important;
+  }
+
+  :global(.svelte-flow__controls-button) {
+    background: var(--warm-gray-500) !important;
+    border-bottom: 1px solid rgba(227, 223, 215, 0.1) !important;
+    color: var(--warm-gray-200) !important;
+  }
+
+  :global(.svelte-flow__controls-button:hover) {
+    background: var(--warm-gray-400) !important;
+  }
+
+  :global(.svelte-flow__controls-button svg) {
+    fill: var(--warm-gray-200) !important;
+  }
+
+  :global(.svelte-flow__minimap) {
+    background: var(--warm-gray-700) !important;
+    border: 1px solid rgba(227, 223, 215, 0.2) !important;
+    border-radius: var(--radius-md) !important;
+  }
+
+  :global(.svelte-flow__minimap-mask) {
+    fill: var(--warm-gray-800) !important;
+    fill-opacity: 0.8 !important;
+  }
+
+  :global(.svelte-flow__minimap-node) {
+    fill: var(--warm-gray-500) !important;
+    stroke: var(--warm-gray-400) !important;
+  }
+
+  :global(.svelte-flow__selection) {
+    background: rgba(159, 179, 150, 0.1) !important;
+    border: 1px solid var(--color-primary) !important;
+  }
+
+  :global(.svelte-flow__edge.animated .svelte-flow__edge-path) {
+    stroke-dasharray: 5;
+    animation: dashdraw 0.5s linear infinite;
+  }
+
+  :global(.svelte-flow__handle) {
+    background: var(--warm-gray-400) !important;
+    border: 2px solid var(--warm-gray-700) !important;
+  }
+
+  :global(.svelte-flow__handle.connectable:hover) {
+    background: var(--color-primary) !important;
+  }
+
+  @keyframes dashdraw {
+    from {
+      stroke-dashoffset: 10;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+</style>
