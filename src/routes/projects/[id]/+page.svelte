@@ -6,6 +6,7 @@
 	import { goto } from '$app/navigation'
 	import type { Project } from '../../../types'
 	import GameMechanics from '../../../components/GameMechanics.svelte'
+	import WorldLocations from '../../../components/worlds/WorldLocations.svelte'
 
 	let project: Project | null = null
 	let loading = true
@@ -343,27 +344,7 @@
 				<GameMechanics {project} />
 
 			{:else if activeSection === 'world'}
-				<div class="section-view">
-					<div class="section-header">
-						<div>
-							<h2 class="section-title">World & Locations</h2>
-							<p class="section-subtitle">Locations, maps, and world-building</p>
-						</div>
-						<button class="action-btn">
-							<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-								<path d="M8 3v10M3 8h10"/>
-							</svg>
-							New Location
-						</button>
-					</div>
-					
-					<div class="empty-state">
-						<div class="empty-icon">🌍</div>
-						<div class="empty-title">No locations created yet</div>
-						<p class="empty-description">Build your game world and locations.</p>
-						<button class="empty-action">Create Location</button>
-					</div>
-				</div>
+				<WorldLocations {project} />
 
 			{:else if activeSection === 'tasks'}
 				<div class="section-view">
