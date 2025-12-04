@@ -263,7 +263,7 @@
   function parseDescriptionWithKeywords(text: string) {
     if (!text) return [];
     
-    const parts: Array<{type: 'text' | 'keyword', content: string, definition?: string}> = [];
+    const parts: Array<{type: 'text' | 'keyword' | 'linebreak', content: string, definition?: string}> = [];
     const regex = /\[([^\]]+)\]/g;
     let lastIndex = 0;
     let match;
@@ -271,10 +271,8 @@
     while ((match = regex.exec(text)) !== null) {
       // Add text before the keyword
       if (match.index > lastIndex) {
-        parts.push({
-          type: 'text',
-          content: text.substring(lastIndex, match.index)
-        });
+        const textBefore = text.substring(lastIndex, match.index);
+        addTextWithLineBreaks(parts, textBefore);
       }
 
       // Add the keyword
@@ -292,13 +290,31 @@
 
     // Add remaining text
     if (lastIndex < text.length) {
-      parts.push({
-        type: 'text',
-        content: text.substring(lastIndex)
-      });
+      const textAfter = text.substring(lastIndex);
+      addTextWithLineBreaks(parts, textAfter);
     }
 
     return parts;
+  }
+
+  // Helper to add text with line breaks
+  function addTextWithLineBreaks(parts: any[], text: string) {
+    const lines = text.split('\n');
+    lines.forEach((line, index) => {
+      if (line) {
+        parts.push({
+          type: 'text',
+          content: line
+        });
+      }
+      // Add line break after each line except the last
+      if (index < lines.length - 1) {
+        parts.push({
+          type: 'linebreak',
+          content: ''
+        });
+      }
+    });
   }
 
   // Debug: Log when template changes
@@ -754,6 +770,8 @@
                           >
                             {part.content}
                           </span>
+                        {:else if part.type === 'linebreak'}
+                          <br />
                         {/if}
                       {/each}
                     </p>
@@ -1104,6 +1122,8 @@
                       >
                         {part.content}
                       </span>
+                    {:else if part.type === 'linebreak'}
+                      <br />
                     {/if}
                   {/each}
                 </p>
