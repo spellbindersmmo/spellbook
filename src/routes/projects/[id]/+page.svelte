@@ -7,6 +7,8 @@
 	import type { Project } from '../../../types'
 	import GameMechanics from '../../../components/GameMechanics.svelte'
 	import WorldLocations from '../../../components/worlds/WorldLocations.svelte'
+	import ClassesCanvas from '../../../components/classesandmagictypes/ClassesCanvas.svelte'
+	import MagicCanvas from '../../../components/classesandmagictypes/MagicCanvas.svelte'
 
 	let project: Project | null = null
 	let loading = true
@@ -15,6 +17,10 @@
 	let sidebarWidth = 260
 	let isResizing = false
 	let authChecked = false
+	
+	// Classes & Magic state
+	let showClassesCanvas = false
+	let showMagicCanvas = false
 
 	$: projectId = $page.params.id
 
@@ -24,6 +30,7 @@
 		{ id: 'characters', name: 'Characters', icon: '👥', description: 'Character profiles' },
 		{ id: 'story', name: 'Story', icon: '📖', description: 'Narrative elements' },
 		{ id: 'mechanics', name: 'Mechanics', icon: '⚙️', description: 'Game systems' },
+		{ id: 'classes-magic', name: 'Classes & Magic', icon: '✨', description: 'Classes & spells' },
 		{ id: 'world', name: 'World', icon: '🌍', description: 'Locations & lore' },
 		{ id: 'tasks', name: 'Tasks', icon: '✅', description: 'Progress tracking' }
 	]
@@ -343,6 +350,114 @@
 			{:else if activeSection === 'mechanics'}
 				<GameMechanics {project} />
 
+			{:else if activeSection === 'classes-magic'}
+				<div class="section-view classes-magic-view">
+					<div class="section-header">
+						<div>
+							<h2 class="section-title">Classes & Magic</h2>
+							<p class="section-subtitle">Design character classes, abilities, spells, and magic systems</p>
+						</div>
+					</div>
+					
+					<div class="feature-cards">
+						<button class="feature-card classes-card" on:click={() => showClassesCanvas = true}>
+							<div class="feature-card-header">
+								<div class="feature-card-icon">⚔️</div>
+								<div class="feature-card-badge">Classes</div>
+							</div>
+							<h3 class="feature-card-title">Classes & Archetypes</h3>
+							<p class="feature-card-description">
+								Design character classes with subclasses, abilities, progression trees, and stat blocks
+							</p>
+							<div class="feature-card-meta">
+								<div class="feature-meta-item">
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+										<rect x="2" y="2" width="12" height="12" rx="2"/>
+										<path d="M2 6h12M6 2v12"/>
+									</svg>
+									<span>Canvas-based</span>
+								</div>
+								<div class="feature-meta-item">
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M8 2v12M2 8h12"/>
+									</svg>
+									<span>Hierarchical</span>
+								</div>
+							</div>
+							<div class="feature-card-arrow">
+								<svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M6 4l4 4-4 4"/>
+								</svg>
+							</div>
+						</button>
+						
+						<button class="feature-card magic-card" on:click={() => showMagicCanvas = true}>
+							<div class="feature-card-header">
+								<div class="feature-card-icon">✨</div>
+								<div class="feature-card-badge">Magic</div>
+							</div>
+							<h3 class="feature-card-title">Magic Systems</h3>
+							<p class="feature-card-description">
+								Create magic types with schools, spells, rituals, components, and casting mechanics
+							</p>
+							<div class="feature-card-meta">
+								<div class="feature-meta-item">
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+										<circle cx="8" cy="8" r="6"/>
+										<path d="M8 5v6M5 8h6"/>
+									</svg>
+									<span>Spell database</span>
+								</div>
+								<div class="feature-meta-item">
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M3 8l3 3 7-7"/>
+									</svg>
+									<span>Schools & types</span>
+								</div>
+							</div>
+							<div class="feature-card-arrow">
+								<svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M6 4l4 4-4 4"/>
+								</svg>
+							</div>
+						</button>
+					</div>
+					
+					<div class="features-overview">
+						<h3 class="overview-title">Features</h3>
+						<div class="features-grid">
+							<div class="feature-item">
+								<div class="feature-item-icon">📊</div>
+								<div class="feature-item-content">
+									<h4 class="feature-item-title">Specialized Blocks</h4>
+									<p class="feature-item-text">Use tailored block types for abilities, spells, stats, and progression</p>
+								</div>
+							</div>
+							<div class="feature-item">
+								<div class="feature-item-icon">🎯</div>
+								<div class="feature-item-content">
+									<h4 class="feature-item-title">Visual Organization</h4>
+									<p class="feature-item-text">Drag-and-drop canvas with pan and zoom controls</p>
+								</div>
+							</div>
+							<div class="feature-item">
+								<div class="feature-item-icon">🔗</div>
+								<div class="feature-item-content">
+									<h4 class="feature-item-title">Hierarchical Structure</h4>
+									<p class="feature-item-text">Organize with base classes → subclasses, magic types → schools</p>
+								</div>
+							</div>
+							<div class="feature-item">
+								<div class="feature-item-icon">💾</div>
+								<div class="feature-item-content">
+									<h4 class="feature-item-title">Auto-save</h4>
+									<p class="feature-item-text">Changes save automatically as you work</p>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
 			{:else if activeSection === 'world'}
 				<WorldLocations {project} />
 
@@ -371,6 +486,21 @@
 			{/if}
 		</main>
 	</div>
+	
+	<!-- Classes & Magic Canvases -->
+	{#if showClassesCanvas && project}
+		<ClassesCanvas 
+			world={project} 
+			onClose={() => showClassesCanvas = false}
+		/>
+	{/if}
+	
+	{#if showMagicCanvas && project}
+		<MagicCanvas 
+			world={project} 
+			onClose={() => showMagicCanvas = false}
+		/>
+	{/if}
 {:else}
 	<div class="error-screen">
 		<div class="error-container">
@@ -990,6 +1120,222 @@
 		background: var(--color-primary-hover);
 		box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 		transform: translateY(-1px);
+	}
+
+	/* Classes & Magic Section */
+	.classes-magic-view {
+		max-width: 1000px;
+	}
+
+	.feature-cards {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+		gap: 1.5rem;
+		margin-bottom: 3rem;
+	}
+
+	.feature-card {
+		position: relative;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 12px;
+		padding: 2rem;
+		cursor: pointer;
+		transition: all 0.25s ease;
+		text-align: left;
+		overflow: hidden;
+	}
+
+	.feature-card::before {
+		content: '';
+		position: absolute;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: 3px;
+		background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+		opacity: 0;
+		transition: opacity 0.25s ease;
+	}
+
+	.feature-card:hover {
+		border-color: var(--color-primary);
+		transform: translateY(-2px);
+		box-shadow: var(--shadow-lg);
+	}
+
+	.feature-card:hover::before {
+		opacity: 1;
+	}
+
+	.classes-card:hover {
+		border-color: #9FB396;
+		box-shadow: 0 8px 24px rgba(159, 179, 150, 0.25);
+	}
+
+	.classes-card::before {
+		background: linear-gradient(90deg, #9FB396, #7A8C6F);
+	}
+
+	.magic-card:hover {
+		border-color: #8d6ed6;
+		box-shadow: 0 8px 24px rgba(141, 110, 214, 0.25);
+	}
+
+	.magic-card::before {
+		background: linear-gradient(90deg, #8d6ed6, #b68dd6);
+	}
+
+	.feature-card-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 1rem;
+	}
+
+	.feature-card-icon {
+		font-size: 2.5rem;
+		line-height: 1;
+	}
+
+	.feature-card-badge {
+		padding: 0.375rem 0.75rem;
+		background: var(--color-primary-light);
+		color: var(--color-primary);
+		border-radius: 6px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.classes-card .feature-card-badge {
+		background: rgba(159, 179, 150, 0.15);
+		color: #9FB396;
+	}
+
+	.magic-card .feature-card-badge {
+		background: rgba(141, 110, 214, 0.15);
+		color: #8d6ed6;
+	}
+
+	.feature-card-title {
+		font-size: 1.375rem;
+		font-weight: 600;
+		color: var(--color-text-primary);
+		margin: 0 0 0.75rem 0;
+		line-height: 1.3;
+	}
+
+	.feature-card-description {
+		font-size: 0.9375rem;
+		color: var(--color-text-secondary);
+		line-height: 1.6;
+		margin: 0 0 1.5rem 0;
+	}
+
+	.feature-card-meta {
+		display: flex;
+		gap: 1.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.feature-meta-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: var(--color-text-tertiary);
+		font-size: 0.8125rem;
+	}
+
+	.feature-meta-item svg {
+		opacity: 0.7;
+	}
+
+	.feature-card-arrow {
+		position: absolute;
+		bottom: 1.5rem;
+		right: 1.5rem;
+		width: 32px;
+		height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-background-alt);
+		border-radius: 6px;
+		color: var(--color-text-tertiary);
+		transition: all 0.25s ease;
+	}
+
+	.feature-card:hover .feature-card-arrow {
+		background: var(--color-primary);
+		color: white;
+		transform: translateX(4px);
+	}
+
+	.classes-card:hover .feature-card-arrow {
+		background: #9FB396;
+	}
+
+	.magic-card:hover .feature-card-arrow {
+		background: #8d6ed6;
+	}
+
+	/* Features Overview */
+	.features-overview {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 12px;
+		padding: 2rem;
+	}
+
+	.overview-title {
+		font-size: 1.125rem;
+		font-weight: 600;
+		color: var(--color-text-primary);
+		margin: 0 0 1.5rem 0;
+	}
+
+	.features-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 1.5rem;
+	}
+
+	.feature-item {
+		display: flex;
+		gap: 1rem;
+	}
+
+	.feature-item-icon {
+		font-size: 1.5rem;
+		flex-shrink: 0;
+		width: 40px;
+		height: 40px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-background-alt);
+		border-radius: 8px;
+	}
+
+	.feature-item-content {
+		flex: 1;
+	}
+
+	.feature-item-title {
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: var(--color-text-primary);
+		margin: 0 0 0.25rem 0;
+		line-height: 1.3;
+	}
+
+	.feature-item-text {
+		font-size: 0.8125rem;
+		color: var(--color-text-secondary);
+		line-height: 1.5;
+		margin: 0;
 	}
 
 	/* Scrollbar Styling */
