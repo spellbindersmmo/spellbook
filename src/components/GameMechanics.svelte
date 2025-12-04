@@ -9,6 +9,7 @@
   import CommentNode from './nodes/CommentNode.svelte';
   import LoopNode from './nodes/LoopNode.svelte';
   import { supabase } from '$lib/supabase';
+  import CardDatabase from './carddatabase/CardDatabase.svelte';
 
   interface Props {
     project: Project;
@@ -16,6 +17,43 @@
 
   let { project }: Props = $props();
 
+  // Tool selection state
+  let activeTool = $state<'select' | 'flowchart' | 'cards'>('select');
+
+  const mechanicsTools = [
+    {
+      id: 'flowchart',
+      name: 'Flow Charts',
+      icon: '📊',
+      description: 'Visual game flow and turn sequences',
+      color: '#9FB396'
+    },
+    {
+      id: 'cards',
+      name: 'Card Database',
+      icon: '🎴',
+      description: 'Create and manage game cards',
+      color: '#D4A574'
+    },
+    {
+      id: 'systems',
+      name: 'Game Systems',
+      icon: '⚙️',
+      description: 'Core mechanics and rules',
+      color: '#8A9B7A',
+      comingSoon: true
+    },
+    {
+      id: 'items',
+      name: 'Items & Inventory',
+      icon: '🎒',
+      description: 'Equipment and item management',
+      color: '#E08B68',
+      comingSoon: true
+    }
+  ];
+
+  // ============= FLOWCHART STATE (existing code) =============
   const nodeTypes = {
     process: ProcessNode,
     start: StartNode,
@@ -115,13 +153,17 @@
   let draggedType = $state(null);
   let previousEdgeCount = $state(edges.length);
 
-  // Load flows on mount
+  // Load flows on mount (only for flowchart)
   $effect(() => {
-    loadFlows();
+    if (activeTool === 'flowchart') {
+      loadFlows();
+    }
   });
 
   // Auto-save when nodes or edges change
   $effect(() => {
+    if (activeTool !== 'flowchart') return;
+    
     // Track nodes and edges for changes
     const _ = [nodes, edges];
     
@@ -338,6 +380,8 @@
 
   // Auto-label edges from decision/loop nodes (only on new edges)
   $effect(() => {
+    if (activeTool !== 'flowchart') return;
+    
     if (edges.length > previousEdgeCount) {
       edges = edges.map(edge => {
         if (!edge.baseLabel) {
@@ -381,6 +425,8 @@
 
   // Get selected edge
   $effect(() => {
+    if (activeTool !== 'flowchart') return;
+    
     const selected = edges.find(e => e.selected);
     if (selected && selected.id !== selectedEdgeId) {
       selectedEdgeId = selected.id;
@@ -529,6 +575,8 @@
 
   // Update last saved time display every 10 seconds
   $effect(() => {
+    if (activeTool !== 'flowchart') return;
+    
     const interval = setInterval(() => {
       if (lastSavedAt) {
         // Force re-render
@@ -541,376 +589,422 @@
 </script>
 
 <div class="mechanics-container">
-  <!-- Header -->
-  <div class="mechanics-header">
-    <div class="header-content">
-      <div>
-        <h2 class="header-title">⚙️ Game Mechanics - {flowName}</h2>
-        <div class="header-meta">
-          {#if flowDescription}
-            <p class="flow-description">{flowDescription}</p>
-          {/if}
-          {#if currentFlowId && lastSavedAt}
-            <p class="autosave-indicator">
-              <span class="status-dot"></span>
-              {formatLastSaved()}
-            </p>
-          {/if}
-        </div>
+  {#if activeTool === 'select'}
+    <!-- Tool Selection View -->
+    <div class="tool-selection">
+      <div class="selection-header">
+        <h2 class="selection-title">⚙️ Game Mechanics Tools</h2>
+        <p class="selection-subtitle">Choose a tool to design your game mechanics</p>
       </div>
-      <div class="header-actions">
-        {#if currentFlowId}
-          <label class="autosave-toggle">
-            <input 
-              type="checkbox" 
-              bind:checked={autoSaveEnabled}
-            />
-            Auto-save
-          </label>
-        {/if}
-        <button 
-          on:click|stopPropagation={newFlow}
-          type="button"
-          class="btn btn-secondary"
-        >
-          🆕 New Flow
-        </button>
-        <button 
-          on:click|stopPropagation={() => showLoadDialog = true}
-          type="button"
-          class="btn btn-accent"
-        >
-          📂 Load Flow
-        </button>
-        <button 
-          on:click|stopPropagation={() => showSaveDialog = true}
-          type="button"
-          class="btn btn-primary"
-        >
-          💾 Save Flow
-        </button>
-      </div>
-    </div>
-  </div>
 
-  <!-- Main Content: Sidebar + Canvas -->
-  <div class="mechanics-main">
-    <!-- Left Sidebar -->
-    <div class="sidebar">
-      <h3 class="sidebar-title">Node Types</h3>
-      <p class="sidebar-subtitle">Drag nodes onto the canvas</p>
-      
-      <div class="node-templates">
-        {#each nodeTemplates as template}
-          <div 
-            draggable="true"
-            on:dragstart={(e) => onDragStart(e, template.type)}
-            class="node-template"
+      <div class="tools-grid">
+        {#each mechanicsTools as tool}
+          <button
+            class="tool-card"
+            class:coming-soon={tool.comingSoon}
+            style="--tool-color: {tool.color}"
+            on:click={() => !tool.comingSoon && (activeTool = tool.id)}
+            disabled={tool.comingSoon}
           >
-            <div class="template-header">
-              <span class="template-icon">{template.icon}</span>
-              <span class="template-label">{template.label}</span>
-            </div>
-            <p class="template-description">{template.description}</p>
-          </div>
+            <div class="tool-icon">{tool.icon}</div>
+            <h3 class="tool-name">{tool.name}</h3>
+            <p class="tool-description">{tool.description}</p>
+            {#if tool.comingSoon}
+              <span class="coming-soon-badge">Coming Soon</span>
+            {/if}
+          </button>
         {/each}
       </div>
+    </div>
 
-      <div class="sidebar-tips">
-        <h4 class="tips-title">Tips</h4>
-        <ul class="tips-list">
-          <li>Drag nodes from here to the canvas</li>
-          <li>Click edges to change line style</li>
-          <li>Add resource flows to edges</li>
-          <li>Loop nodes have 2 outputs</li>
-          <li>Double-click to edit nodes</li>
-          {#if autoSaveEnabled && currentFlowId}
-            <li class="tip-success">✓ Auto-save is enabled</li>
+  {:else if activeTool === 'flowchart'}
+    <!-- Flowchart Tool (existing flowchart UI) -->
+    <div class="tool-view">
+      <!-- Header -->
+      <div class="mechanics-header">
+        <div class="header-content">
+          <div class="header-left">
+            <button 
+              class="back-btn"
+              on:click={() => activeTool = 'select'}
+            >
+              ← Back to Tools
+            </button>
+            <div class="header-divider"></div>
+            <div>
+              <h2 class="header-title">📊 Flow Charts - {flowName}</h2>
+              <div class="header-meta">
+                {#if flowDescription}
+                  <p class="flow-description">{flowDescription}</p>
+                {/if}
+                {#if currentFlowId && lastSavedAt}
+                  <p class="autosave-indicator">
+                    <span class="status-dot"></span>
+                    {formatLastSaved()}
+                  </p>
+                {/if}
+              </div>
+            </div>
+          </div>
+          <div class="header-actions">
+            {#if currentFlowId}
+              <label class="autosave-toggle">
+                <input 
+                  type="checkbox" 
+                  bind:checked={autoSaveEnabled}
+                />
+                Auto-save
+              </label>
+            {/if}
+            <button 
+              on:click|stopPropagation={newFlow}
+              type="button"
+              class="btn btn-secondary"
+            >
+              🆕 New Flow
+            </button>
+            <button 
+              on:click|stopPropagation={() => showLoadDialog = true}
+              type="button"
+              class="btn btn-accent"
+            >
+              📂 Load Flow
+            </button>
+            <button 
+              on:click|stopPropagation={() => showSaveDialog = true}
+              type="button"
+              class="btn btn-primary"
+            >
+              💾 Save Flow
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content: Sidebar + Canvas -->
+      <div class="mechanics-main">
+        <!-- Left Sidebar -->
+        <div class="sidebar">
+          <h3 class="sidebar-title">Node Types</h3>
+          <p class="sidebar-subtitle">Drag nodes onto the canvas</p>
+          
+          <div class="node-templates">
+            {#each nodeTemplates as template}
+              <div 
+                draggable="true"
+                on:dragstart={(e) => onDragStart(e, template.type)}
+                class="node-template"
+              >
+                <div class="template-header">
+                  <span class="template-icon">{template.icon}</span>
+                  <span class="template-label">{template.label}</span>
+                </div>
+                <p class="template-description">{template.description}</p>
+              </div>
+            {/each}
+          </div>
+
+          <div class="sidebar-tips">
+            <h4 class="tips-title">Tips</h4>
+            <ul class="tips-list">
+              <li>Drag nodes from here to the canvas</li>
+              <li>Click edges to change line style</li>
+              <li>Add resource flows to edges</li>
+              <li>Loop nodes have 2 outputs</li>
+              <li>Double-click to edit nodes</li>
+              {#if autoSaveEnabled && currentFlowId}
+                <li class="tip-success">✓ Auto-save is enabled</li>
+              {/if}
+            </ul>
+          </div>
+        </div>
+
+        <!-- Flow Canvas -->
+        <div 
+          class="canvas-container"
+          on:drop={onDrop}
+          on:dragover={onDragOver}
+        >
+          <SvelteFlow 
+            bind:nodes 
+            bind:edges 
+            {nodeTypes}
+            {defaultEdgeOptions}
+            edgesReconnectable={true}
+            fitView
+          >
+            <Controls />
+            <Background />
+            <MiniMap />
+            
+            <Panel position="top-right">
+              <div class="stats-panel">
+                <div class="stats-text">
+                  <strong>{nodes.length}</strong> nodes • <strong>{edges.length}</strong> connections
+                </div>
+              </div>
+            </Panel>
+
+            {#if selectedEdgeId}
+              <Panel position="top-center">
+                <div class="edge-toolbar">
+                  <button 
+                    on:click={openEdgeLabelEditor}
+                    class="btn btn-primary btn-sm"
+                  >
+                    ✏️ Edit Connection
+                  </button>
+                  
+                  <!-- Quick edge type selector -->
+                  <div class="edge-type-selector">
+                    {#each edgeTypes as type}
+                      <button
+                        on:click={() => changeEdgeType(type.value)}
+                        title={type.label}
+                        class="edge-type-btn"
+                        class:active={edgeType === type.value}
+                      >
+                        {type.icon}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              </Panel>
+            {/if}
+          </SvelteFlow>
+
+          <!-- Save Dialog -->
+          {#if showSaveDialog}
+            <div class="dialog-overlay" on:click={() => showSaveDialog = false}></div>
+            <div class="dialog">
+              <h3 class="dialog-title">Save Flow</h3>
+              
+              <div class="form-group">
+                <label class="form-label">Flow Name</label>
+                <input
+                  type="text"
+                  bind:value={flowName}
+                  placeholder="e.g., Turn Sequence"
+                  class="input nodrag"
+                />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Description (Optional)</label>
+                <textarea
+                  bind:value={flowDescription}
+                  placeholder="Describe this flow..."
+                  rows="3"
+                  class="input nodrag"
+                ></textarea>
+              </div>
+
+              {#if saveMessage}
+                <div class="save-message" class:error={saveMessage.includes('Error')}>
+                  {saveMessage}
+                </div>
+              {/if}
+
+              <div class="dialog-actions">
+                <button 
+                  on:click={saveFlow} 
+                  disabled={isSaving}
+                  class="btn btn-primary nodrag"
+                  style="opacity: {isSaving ? 0.6 : 1};"
+                >
+                  {isSaving ? 'Saving...' : '💾 Save'}
+                </button>
+                <button 
+                  on:click={() => showSaveDialog = false}
+                  class="btn btn-secondary nodrag"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           {/if}
-        </ul>
+
+          <!-- Load Dialog -->
+          {#if showLoadDialog}
+            <div class="dialog-overlay" on:click={() => showLoadDialog = false}></div>
+            <div class="dialog dialog-wide">
+              <h3 class="dialog-title">Load Flow</h3>
+              
+              {#if savedFlows.length === 0}
+                <div class="empty-state">
+                  <div class="empty-icon">📂</div>
+                  <div class="empty-title">No saved flows yet</div>
+                  <p class="empty-description">Create and save your first flow!</p>
+                </div>
+              {:else}
+                <div class="flows-list">
+                  {#each savedFlows as flow}
+                    <div 
+                      class="flow-item"
+                      class:active={currentFlowId === flow.id}
+                      on:click={() => loadFlowById(flow.id)}
+                    >
+                      <div class="flow-content">
+                        <div class="flow-name">{flow.name}</div>
+                        {#if flow.description}
+                          <div class="flow-description">{flow.description}</div>
+                        {/if}
+                        <div class="flow-meta">
+                          Updated: {new Date(flow.updated_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        on:click|stopPropagation={() => deleteFlow(flow.id)}
+                        class="btn-delete nodrag"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
+              <div class="dialog-actions">
+                <button 
+                  on:click={() => showLoadDialog = false}
+                  class="btn btn-secondary nodrag"
+                  style="width: 100%;"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Edge Editor -->
+          {#if showEdgeEditor}
+            <div class="dialog-overlay" on:click={closeEdgeEditor}></div>
+            <div class="edge-editor">
+              <h3 class="dialog-title">Edit Connection</h3>
+              
+              <!-- Edge Type Section -->
+              <div class="form-group">
+                <label class="form-label">Line Style</label>
+                <div class="edge-type-grid">
+                  {#each edgeTypes as type}
+                    <button
+                      on:click={() => changeEdgeType(type.value)}
+                      class="edge-type-card nodrag"
+                      class:active={edgeType === type.value}
+                    >
+                      <span class="type-icon">{type.icon}</span>
+                      <span class="type-label">{type.label}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+
+              <!-- Label Section -->
+              <div class="form-group">
+                <label class="form-label">Label</label>
+                <input
+                  type="text"
+                  bind:value={edgeLabelInput}
+                  placeholder="e.g., Yes, No, then..."
+                  class="input nodrag"
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter') saveEdgeLabel();
+                    if (e.key === 'Escape') closeEdgeEditor();
+                  }}
+                />
+              </div>
+
+              <!-- Resource Flow Section -->
+              <div class="form-group">
+                <label class="form-label">Resource Flows</label>
+                
+                <!-- Existing Resources -->
+                {#if edgeResources.length > 0}
+                  <div class="resources-list">
+                    {#each edgeResources as resource, index}
+                      <div 
+                        class="resource-tag"
+                        style="background: {resource.color};"
+                      >
+                        <span>{resource.icon} {resource.value}</span>
+                        <button
+                          on:click={() => removeResource(index)}
+                          class="resource-remove nodrag"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+
+                <!-- Resource Presets -->
+                <div class="presets-section">
+                  <div class="presets-label">Quick add:</div>
+                  <div class="presets-grid">
+                    {#each resourcePresets as preset}
+                      <button
+                        on:click={() => useResourcePreset(preset)}
+                        class="preset-btn nodrag"
+                        style="background: {preset.color};"
+                        title={preset.label}
+                      >
+                        {preset.icon}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+
+                <!-- Add New Resource -->
+                <div class="resource-input-group">
+                  <input
+                    type="text"
+                    bind:value={newResourceIcon}
+                    placeholder="Icon (e.g., 💰)"
+                    class="input input-sm nodrag"
+                  />
+                  <input
+                    type="text"
+                    bind:value={newResourceValue}
+                    placeholder="Value (e.g., +5)"
+                    class="input input-sm nodrag"
+                  />
+                  <input
+                    type="color"
+                    bind:value={newResourceColor}
+                    class="color-input nodrag"
+                  />
+                  <button
+                    on:click={addResource}
+                    class="btn btn-primary btn-sm nodrag"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              <!-- Action Buttons -->
+              <div class="dialog-actions">
+                <button on:click={saveEdgeLabel} class="btn btn-primary">
+                  ✓ Save
+                </button>
+                <button on:click={closeEdgeEditor} class="btn btn-secondary">
+                  Cancel
+                </button>
+                <button on:click={deleteSelectedEdge} class="btn-delete-edge">
+                  🗑️ Delete
+                </button>
+              </div>
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
 
-    <!-- Flow Canvas -->
-    <div 
-      class="canvas-container"
-      on:drop={onDrop}
-      on:dragover={onDragOver}
-    >
-      <SvelteFlow 
-        bind:nodes 
-        bind:edges 
-        {nodeTypes}
-        {defaultEdgeOptions}
-        edgesReconnectable={true}
-        fitView
-      >
-        <Controls />
-        <Background />
-        <MiniMap />
-        
-        <Panel position="top-right">
-          <div class="stats-panel">
-            <div class="stats-text">
-              <strong>{nodes.length}</strong> nodes • <strong>{edges.length}</strong> connections
-            </div>
-          </div>
-        </Panel>
-
-        {#if selectedEdgeId}
-          <Panel position="top-center">
-            <div class="edge-toolbar">
-              <button 
-                on:click={openEdgeLabelEditor}
-                class="btn btn-primary btn-sm"
-              >
-                ✏️ Edit Connection
-              </button>
-              
-              <!-- Quick edge type selector -->
-              <div class="edge-type-selector">
-                {#each edgeTypes as type}
-                  <button
-                    on:click={() => changeEdgeType(type.value)}
-                    title={type.label}
-                    class="edge-type-btn"
-                    class:active={edgeType === type.value}
-                  >
-                    {type.icon}
-                  </button>
-                {/each}
-              </div>
-            </div>
-          </Panel>
-        {/if}
-      </SvelteFlow>
-
-      <!-- Save Dialog -->
-      {#if showSaveDialog}
-        <div class="dialog-overlay" on:click={() => showSaveDialog = false}></div>
-        <div class="dialog">
-          <h3 class="dialog-title">Save Flow</h3>
-          
-          <div class="form-group">
-            <label class="form-label">Flow Name</label>
-            <input
-              type="text"
-              bind:value={flowName}
-              placeholder="e.g., Turn Sequence"
-              class="input nodrag"
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Description (Optional)</label>
-            <textarea
-              bind:value={flowDescription}
-              placeholder="Describe this flow..."
-              rows="3"
-              class="input nodrag"
-            ></textarea>
-          </div>
-
-          {#if saveMessage}
-            <div class="save-message" class:error={saveMessage.includes('Error')}>
-              {saveMessage}
-            </div>
-          {/if}
-
-          <div class="dialog-actions">
-            <button 
-              on:click={saveFlow} 
-              disabled={isSaving}
-              class="btn btn-primary nodrag"
-              style="opacity: {isSaving ? 0.6 : 1};"
-            >
-              {isSaving ? 'Saving...' : '💾 Save'}
-            </button>
-            <button 
-              on:click={() => showSaveDialog = false}
-              class="btn btn-secondary nodrag"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Load Dialog -->
-      {#if showLoadDialog}
-        <div class="dialog-overlay" on:click={() => showLoadDialog = false}></div>
-        <div class="dialog dialog-wide">
-          <h3 class="dialog-title">Load Flow</h3>
-          
-          {#if savedFlows.length === 0}
-            <div class="empty-state">
-              <div class="empty-icon">📂</div>
-              <div class="empty-title">No saved flows yet</div>
-              <p class="empty-description">Create and save your first flow!</p>
-            </div>
-          {:else}
-            <div class="flows-list">
-              {#each savedFlows as flow}
-                <div 
-                  class="flow-item"
-                  class:active={currentFlowId === flow.id}
-                  on:click={() => loadFlowById(flow.id)}
-                >
-                  <div class="flow-content">
-                    <div class="flow-name">{flow.name}</div>
-                    {#if flow.description}
-                      <div class="flow-description">{flow.description}</div>
-                    {/if}
-                    <div class="flow-meta">
-                      Updated: {new Date(flow.updated_at).toLocaleDateString()}
-                    </div>
-                  </div>
-                  <button
-                    on:click|stopPropagation={() => deleteFlow(flow.id)}
-                    class="btn-delete nodrag"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          <div class="dialog-actions">
-            <button 
-              on:click={() => showLoadDialog = false}
-              class="btn btn-secondary nodrag"
-              style="width: 100%;"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Edge Editor -->
-      {#if showEdgeEditor}
-        <div class="dialog-overlay" on:click={closeEdgeEditor}></div>
-        <div class="edge-editor">
-          <h3 class="dialog-title">Edit Connection</h3>
-          
-          <!-- Edge Type Section -->
-          <div class="form-group">
-            <label class="form-label">Line Style</label>
-            <div class="edge-type-grid">
-              {#each edgeTypes as type}
-                <button
-                  on:click={() => changeEdgeType(type.value)}
-                  class="edge-type-card nodrag"
-                  class:active={edgeType === type.value}
-                >
-                  <span class="type-icon">{type.icon}</span>
-                  <span class="type-label">{type.label}</span>
-                </button>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Label Section -->
-          <div class="form-group">
-            <label class="form-label">Label</label>
-            <input
-              type="text"
-              bind:value={edgeLabelInput}
-              placeholder="e.g., Yes, No, then..."
-              class="input nodrag"
-              on:keydown={(e) => {
-                if (e.key === 'Enter') saveEdgeLabel();
-                if (e.key === 'Escape') closeEdgeEditor();
-              }}
-            />
-          </div>
-
-          <!-- Resource Flow Section -->
-          <div class="form-group">
-            <label class="form-label">Resource Flows</label>
-            
-            <!-- Existing Resources -->
-            {#if edgeResources.length > 0}
-              <div class="resources-list">
-                {#each edgeResources as resource, index}
-                  <div 
-                    class="resource-tag"
-                    style="background: {resource.color};"
-                  >
-                    <span>{resource.icon} {resource.value}</span>
-                    <button
-                      on:click={() => removeResource(index)}
-                      class="resource-remove nodrag"
-                    >
-                      ×
-                    </button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-
-            <!-- Resource Presets -->
-            <div class="presets-section">
-              <div class="presets-label">Quick add:</div>
-              <div class="presets-grid">
-                {#each resourcePresets as preset}
-                  <button
-                    on:click={() => useResourcePreset(preset)}
-                    class="preset-btn nodrag"
-                    style="background: {preset.color};"
-                    title={preset.label}
-                  >
-                    {preset.icon}
-                  </button>
-                {/each}
-              </div>
-            </div>
-
-            <!-- Add New Resource -->
-            <div class="resource-input-group">
-              <input
-                type="text"
-                bind:value={newResourceIcon}
-                placeholder="Icon (e.g., 💰)"
-                class="input input-sm nodrag"
-              />
-              <input
-                type="text"
-                bind:value={newResourceValue}
-                placeholder="Value (e.g., +5)"
-                class="input input-sm nodrag"
-              />
-              <input
-                type="color"
-                bind:value={newResourceColor}
-                class="color-input nodrag"
-              />
-              <button
-                on:click={addResource}
-                class="btn btn-primary btn-sm nodrag"
-              >
-                + Add
-              </button>
-            </div>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="dialog-actions">
-            <button on:click={saveEdgeLabel} class="btn btn-primary">
-              ✓ Save
-            </button>
-            <button on:click={closeEdgeEditor} class="btn btn-secondary">
-              Cancel
-            </button>
-            <button on:click={deleteSelectedEdge} class="btn-delete-edge">
-              🗑️ Delete
-            </button>
-          </div>
-        </div>
-      {/if}
-    </div>
-  </div>
+  {:else if activeTool === 'cards'}
+    <!-- Card Database Tool -->
+    <CardDatabase {project} />
+  {/if}
 </div>
 
 <style>
@@ -923,11 +1017,161 @@
     background: var(--warm-gray-700);
   }
 
-  /* Header */
+  /* ============= TOOL SELECTION STYLES ============= */
+  .tool-selection {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 3rem 2rem;
+    overflow-y: auto;
+    background: var(--warm-gray-700);
+  }
+
+  .selection-header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .selection-title {
+    font-size: 2rem;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+    margin: 0 0 0.5rem 0;
+  }
+
+  .selection-subtitle {
+    font-size: var(--font-size-base);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .tool-card {
+    background: var(--warm-gray-600);
+    border: 2px solid rgba(227, 223, 215, 0.15);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tool-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--tool-color);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+
+  .tool-card:hover:not(.coming-soon) {
+    border-color: var(--tool-color);
+    background: var(--warm-gray-500);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  }
+
+  .tool-card:hover:not(.coming-soon)::before {
+    opacity: 1;
+  }
+
+  .tool-card.coming-soon {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .tool-icon {
+    font-size: 3.5rem;
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
+  }
+
+  .tool-name {
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+    margin: 0 0 0.75rem 0;
+  }
+
+  .tool-description {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
+    line-height: var(--line-height-relaxed);
+  }
+
+  .coming-soon-badge {
+    display: inline-block;
+    margin-top: 1rem;
+    padding: 0.375rem 0.875rem;
+    background: rgba(227, 223, 215, 0.1);
+    color: var(--color-text-tertiary);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* ============= TOOL VIEW STYLES ============= */
+  .tool-view {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .placeholder-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 3rem;
+    background: var(--warm-gray-700);
+  }
+
+  .placeholder-icon {
+    font-size: 5rem;
+    margin-bottom: 1.5rem;
+    opacity: 0.6;
+  }
+
+  .placeholder-title {
+    font-size: 1.75rem;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+    margin: 0 0 1rem 0;
+  }
+
+  .placeholder-description {
+    font-size: var(--font-size-base);
+    color: var(--color-text-secondary);
+    margin: 0;
+    max-width: 500px;
+  }
+
+  /* ============= HEADER STYLES ============= */
   .mechanics-header {
     padding: 1.5rem 2rem;
     border-bottom: 1px solid var(--color-border);
     background: var(--warm-gray-600);
+    flex-shrink: 0;
   }
 
   .header-content {
@@ -935,6 +1179,39 @@
     justify-content: space-between;
     align-items: center;
     gap: 2rem;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .back-btn {
+    background: var(--warm-gray-500);
+    color: var(--color-text-secondary);
+    border: 1px solid rgba(227, 223, 215, 0.2);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 1rem;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+  }
+
+  .back-btn:hover {
+    background: var(--warm-gray-400);
+    color: var(--color-text-primary);
+    border-color: rgba(227, 223, 215, 0.3);
+  }
+
+  .header-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(227, 223, 215, 0.2);
   }
 
   .header-title {
@@ -993,7 +1270,7 @@
     cursor: pointer;
   }
 
-  /* Main Layout */
+  /* ============= MAIN LAYOUT (FLOWCHART) ============= */
   .mechanics-main {
     flex: 1;
     display: flex;
@@ -1461,29 +1738,58 @@
     color: white;
   }
 
+  /* Empty State */
+  .empty-state {
+    text-align: center;
+    padding: 3rem 2rem;
+  }
+
+  .empty-icon {
+    font-size: 3.5rem;
+    opacity: 0.4;
+    margin-bottom: 1rem;
+  }
+
+  .empty-title {
+    font-size: 1.125rem;
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-text-primary);
+    margin-bottom: 0.5rem;
+  }
+
+  .empty-description {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+
   /* Scrollbar */
   .sidebar::-webkit-scrollbar,
   .flows-list::-webkit-scrollbar,
-  .edge-editor::-webkit-scrollbar {
+  .edge-editor::-webkit-scrollbar,
+  .tool-selection::-webkit-scrollbar {
     width: 8px;
   }
 
   .sidebar::-webkit-scrollbar-track,
   .flows-list::-webkit-scrollbar-track,
-  .edge-editor::-webkit-scrollbar-track {
+  .edge-editor::-webkit-scrollbar-track,
+  .tool-selection::-webkit-scrollbar-track {
     background: transparent;
   }
 
   .sidebar::-webkit-scrollbar-thumb,
   .flows-list::-webkit-scrollbar-thumb,
-  .edge-editor::-webkit-scrollbar-thumb {
+  .edge-editor::-webkit-scrollbar-thumb,
+  .tool-selection::-webkit-scrollbar-thumb {
     background: rgba(159, 179, 150, 0.25);
     border-radius: var(--radius-sm);
   }
 
   .sidebar::-webkit-scrollbar-thumb:hover,
   .flows-list::-webkit-scrollbar-thumb:hover,
-  .edge-editor::-webkit-scrollbar-thumb:hover {
+  .edge-editor::-webkit-scrollbar-thumb:hover,
+  .tool-selection::-webkit-scrollbar-thumb:hover {
     background: rgba(159, 179, 150, 0.35);
   }
 
