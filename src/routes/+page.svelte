@@ -3,10 +3,13 @@
 	import { user } from '$lib/stores'
 	import { getUserProjects } from '$lib/supabase'
 	import type { Project } from '../types'
+	import ProjectSharing from '../components/ProjectSharing.svelte';
 
 	let projects: Project[] = []
 	let loading = true
 	let error = ''
+	let showSharingModal = false
+	let selectedProject: Project | null = null
 
 	onMount(async () => {
 		if (!$user) return
@@ -40,6 +43,18 @@
 
 	function formatDate(dateString: string) {
 		return new Date(dateString).toLocaleDateString()
+	}
+	
+	function openSharing(event: Event, project: Project) {
+		event.preventDefault()
+		event.stopPropagation()
+		selectedProject = project
+		showSharingModal = true
+	}
+	
+	function closeSharing() {
+		showSharingModal = false
+		selectedProject = null
 	}
 </script>
 
@@ -85,40 +100,60 @@
 		{:else}
 			<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem;">
 				{#each projects as project}
-					<a 
-						href="/projects/{project.id}"
-						style="text-decoration: none; color: inherit;"
-					>
-						<div style="border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;">
-							{#if project.image_url}
-								<img 
-									src={project.image_url} 
-									alt={project.name}
-									style="width: 100%; height: 200px; object-fit: cover;"
-								/>
-							{:else}
-								<div style="width: 100%; height: 200px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem;">
-									🎮
-								</div>
-							{/if}
-							
-							<div style="padding: 1.5rem;">
-								<h3 style="margin: 0 0 0.5rem 0; font-size: 1.25rem;">
-									{project.name}
-								</h3>
-								
-								{#if project.description}
-									<p style="margin: 0 0 1rem 0; color: #666; line-height: 1.4; font-size: 0.95rem;">
-										{project.description}
-									</p>
+					<div class="project-card-wrapper">
+						<a 
+							href="/projects/{project.id}"
+							style="text-decoration: none; color: inherit; display: block;"
+						>
+							<div class="project-card">
+								{#if project.image_url}
+									<img 
+										src={project.image_url} 
+										alt={project.name}
+										style="width: 100%; height: 200px; object-fit: cover;"
+									/>
+								{:else}
+									<div style="width: 100%; height: 200px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem;">
+										🎮
+									</div>
 								{/if}
 								
-								<div style="font-size: 0.875rem; color: #888;">
-									Last updated {formatDate(project.updated_at)}
+								<div style="padding: 1.5rem;">
+									<div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+										<h3 style="margin: 0; font-size: 1.25rem; flex: 1;">
+											{project.name}
+										</h3>
+										
+										<!-- Share button - only show for project owners -->
+										{#if project.user_id === $user?.id}
+											<button
+												class="share-btn"
+												on:click={(e) => openSharing(e, project)}
+												title="Share project"
+											>
+												👥
+											</button>
+										{:else}
+											<!-- Indicator for shared projects -->
+											<span class="shared-badge" title="Shared with you">
+												📤
+											</span>
+										{/if}
+									</div>
+									
+									{#if project.description}
+										<p style="margin: 0 0 1rem 0; color: #666; line-height: 1.4; font-size: 0.95rem;">
+											{project.description}
+										</p>
+									{/if}
+									
+									<div style="font-size: 0.875rem; color: #888;">
+										Last updated {formatDate(project.updated_at)}
+									</div>
 								</div>
 							</div>
-						</div>
-					</a>
+						</a>
+					</div>
 				{/each}
 			</div>
 		{/if}
@@ -149,9 +184,59 @@
 	</div>
 {/if}
 
+<!-- Sharing Modal -->
+{#if showSharingModal && selectedProject}
+	<ProjectSharing 
+		project={selectedProject}
+		currentUserId={$user?.id}
+		onClose={closeSharing}
+	/>
+{/if}
+
 <style>
-	a:hover div {
+	.project-card-wrapper {
+		position: relative;
+	}
+	
+	.project-card {
+		border: 1px solid #ddd;
+		border-radius: 8px;
+		overflow: hidden;
+		background: white;
+		box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+		transition: transform 0.2s, box-shadow 0.2s;
+		cursor: pointer;
+	}
+	
+	.project-card:hover {
 		transform: translateY(-2px);
 		box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+	}
+	
+	.share-btn {
+		background: rgba(0, 122, 204, 0.1);
+		border: 1px solid rgba(0, 122, 204, 0.3);
+		border-radius: 6px;
+		padding: 0.35rem 0.6rem;
+		font-size: 1.1rem;
+		cursor: pointer;
+		transition: all 0.2s;
+		line-height: 1;
+	}
+	
+	.share-btn:hover {
+		background: rgba(0, 122, 204, 0.2);
+		border-color: #007acc;
+		transform: scale(1.05);
+	}
+	
+	.shared-badge {
+		background: rgba(107, 142, 111, 0.15);
+		border: 1px solid rgba(107, 142, 111, 0.3);
+		border-radius: 6px;
+		padding: 0.35rem 0.6rem;
+		font-size: 1rem;
+		line-height: 1;
+		display: inline-block;
 	}
 </style>
